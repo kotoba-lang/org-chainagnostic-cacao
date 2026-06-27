@@ -1,0 +1,12 @@
+{:paths ["src" "test"]
+ :deps {com-junkawasaki/ed25519-clj
+        {:git/url "https://github.com/com-junkawasaki/ed25519-clj"
+         :git/sha "ec077bca1f90027bc718557f1e8bb6fbc004fe5a"}
+        com-junkawasaki/dag-cbor-clj
+        {:git/url "https://github.com/com-junkawasaki/dag-cbor-clj"
+         :git/sha "52b008d96820660196ee8dd15e7d213c9022a6b5"}}
+ :tasks
+ {test
+  {:task (do (require 'clojure.test 'cacao.core-test)
+             (let [r (clojure.test/run-tests 'cacao.core-test)]
+               (when (pos? (+ (:fail r) (:error r))) (System/exit 1))))}}}
