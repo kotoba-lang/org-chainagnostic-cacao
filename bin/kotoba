@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# kotoba — DID / CACAO / seed identity-primitives CLI (babashka).
+#
+# Thin launcher: runs kotoba.cli/-main on babashka. bb has JCA Ed25519 sign/verify
+# and ed25519.core derives the public key in pure Clojure, so no native crypto dep
+# is needed. Deps + source paths come from this repo's bb.edn.
+set -euo pipefail
+repo_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_dir"
+exec bb -m kotoba.cli "$@"

@@ -72,13 +72,45 @@ Built on **com-junkawasaki/ed25519-clj** (sign / did:key) +
 **com-junkawasaki/dag-cbor-clj** (order-preserving CBOR). No native deps,
 babashka-friendly.
 
+## `kotoba` CLI — DID / CACAO / seed
+
+A tiny babashka CLI (`bin/kotoba`, or `bb kotoba …`) over the identity stack.
+Pure argument handling lives in `src/kotoba/cli.cljc` (portable `.cljc`); all
+crypto + IO (SecureRandom, base64, `java.time` instants, and the `ed25519` /
+`cacao` requires) sits behind `#?(:clj …)`. Runs on bb — JCA Ed25519 sign/verify
+work there, and `ed25519.core` derives the public key in pure Clojure.
+
+```bash
+# 1. Mint a fresh Ed25519 seed. THIS IS SECRET — the stderr warning tells you so;
+#    only the base64 seed goes to stdout. Store it safely, never commit it.
+$ bin/kotoba seed
+# SECRET Ed25519 seed — store it safely; anyone with it IS you.
+# Its public did:key:  did:key:z6Mk…
+AAECAwQF…=
+
+# 2. Derive the public did:key from a seed (safe to publish).
+$ bin/kotoba did --seed "AAECAwQF…="
+did:key:z6MkehRgf7yJbgaGfYsdoAsKdBPE3dj2CYhowQdcjqSJgvVd
+
+# 3. Mint a CACAO (iss is DERIVED from the seed; iat=now, exp=now+ttl).
+$ bin/kotoba cacao --seed "AAECAwQF…=" --aud did:key:zNODE \
+    --resource "kotoba://can/kotobase:pin" --ttl-h 24 --nonce n1
+# minted CACAO — iss did:key:z6Mk…
+#   aud=did:key:zNODE exp=2026-07-03T00:00:00Z resources=["kotoba://can/kotobase:pin"]
+<cacao_b64 on stdout>
+```
+
+`--resource` is repeatable; `--ttl-h` defaults to 24; `--nonce` defaults to
+random. `bin/kotoba help` prints full usage.
+
 ## Correctness
 
 `bb test` / `clojure -M:test`: mint→verify round-trip + issuer binding, tamper
 rejection, SIWE plaintext shape, header shape, plus the delegation-chain suite
 (real minted 2- and 3-link chains, tampered middle link, resource escalation,
-expiry ordering, broken iss/aud linkage, `:now` freshness, malformed input)
-→ 14 tests / 89 assertions green.
+expiry ordering, broken iss/aud linkage, `:now` freshness, malformed input),
+plus the `kotoba.cli` suite (arg parsing, validation, deterministic seed→did,
+mint→verify round-trip, ttl/nonce defaults) → 21 tests / 115 assertions green.
 
 ## License
 
