@@ -83,6 +83,107 @@
       {:valid? valid? :iss iss :payload payload})
     (catch Exception _ {:valid? false})))
 
+;; ── delegation chains ─────────────────────────────────────────────────────────
+
+(defn covers?
+  "True when PARENT resource string covers CHILD. A parent ending in `*` is a
+   trailing wildcard and covers every child sharing the prefix before the `*`
+   (e.g. \"kotoba://cap/graph-read/*\" covers \"kotoba://cap/graph-read/g1\");
+   otherwise the match must be exact."
+  [parent child]
+  (and (string? parent) (string? child)
+       (if (str/ends-with? parent "*")
+         (str/starts-with? child (subs parent 0 (dec (count parent))))
+         (= parent child))))
+
+(defn- signature-problems [links]
+  (keep-indexed (fn [i l]
+                  (when-not (:valid? l)
+                    {:problem :chain/invalid-signature :index i}))
+                links))
+
+(defn- temporal-problems
+  "iat <= now < exp for every link, each bound checked when the field is present."
+  [payloads now]
+  (when now
+    (for [[i {:keys [iat exp]}] (map-indexed vector payloads)
+          problem [(when (and iat (pos? (compare iat now)))
+                     {:problem :chain/not-yet-valid :index i :iat iat :now now})
+                   (when (and exp (not (neg? (compare now exp))))
+                     {:problem :chain/expired :index i :exp exp :now now})]
+          :when problem]
+      problem)))
+
+(defn- link-problems
+  "Parent→child constraints for the pair ending at index CI."
+  [parent child ci]
+  (let [uncovered (seq (remove (fn [r] (some #(covers? % r) (:resources parent)))
+                               (:resources child)))]
+    (filter some?
+            [(when (or (nil? (:iss child)) (not= (:iss child) (:aud parent)))
+               {:problem :chain/broken-linkage :index ci
+                :expected (:aud parent) :got (:iss child)})
+             (when uncovered
+               {:problem :chain/resource-escalation :index ci
+                :resources (vec uncovered)})
+             (when (and (:exp parent) (:exp child)
+                        (pos? (compare (:exp child) (:exp parent))))
+               {:problem :chain/expiry-extended :index ci
+                :parent-exp (:exp parent) :child-exp (:exp child)})])))
+
+(defn verify-chain
+  "Verify an ordered CACAO delegation chain (root first, leaf last), given as a
+   vector of base64 CACAO strings. Chain validity requires:
+
+   - every link's EdDSA signature verifies (see `verify`);
+   - for each parent→child pair the child is re-issued by the parent's
+     delegate: child `iss` == parent payload `aud`;
+   - the child's `resources` are a subset of the parent's under `covers?`
+     (exact string match, or a parent trailing-`*` wildcard);
+   - child `exp` <= parent `exp` when both are present.
+
+   OPTS may carry `:now` (an ISO-8601 instant string); when given, every link
+   must satisfy iat <= now < exp (each bound enforced when the field is
+   present), so expired or not-yet-valid links reject the chain.
+
+   Returns {:chain/valid? bool :chain/problems [{:problem ..} ...]
+            :chain/root-iss <root issuer did> :chain/holder <leaf aud>
+            :chain/resources <leaf's effective resource set>
+            :chain/expires <min exp across the chain, or nil>
+            :chain/depth <link count>}.
+   Malformed input never throws — it yields {:chain/valid? false ...}."
+  ([chain] (verify-chain chain nil))
+  ([chain {:keys [now]}]
+   (try
+     (if-not (and (sequential? chain) (seq chain) (every? string? chain))
+       {:chain/valid? false
+        :chain/problems [{:problem :chain/malformed-input}]
+        :chain/root-iss nil :chain/holder nil :chain/resources #{}
+        :chain/expires nil
+        :chain/depth (if (sequential? chain) (count chain) 0)}
+       (let [links (mapv verify chain)
+             payloads (mapv :payload links)
+             problems (vec (concat (signature-problems links)
+                                   (temporal-problems payloads now)
+                                   (mapcat (fn [i]
+                                             (link-problems (payloads i)
+                                                            (payloads (inc i))
+                                                            (inc i)))
+                                           (range (dec (count payloads))))))
+             leaf (peek payloads)]
+         {:chain/valid? (empty? problems)
+          :chain/problems problems
+          :chain/root-iss (:iss (first payloads))
+          :chain/holder (:aud leaf)
+          :chain/resources (set (:resources leaf))
+          :chain/expires (first (sort (keep :exp payloads)))
+          :chain/depth (count chain)}))
+     (catch Exception e
+       {:chain/valid? false
+        :chain/problems [{:problem :chain/error :message (.getMessage e)}]
+        :chain/root-iss nil :chain/holder nil :chain/resources #{}
+        :chain/expires nil :chain/depth 0}))))
+
 (defn auth-header
   "Build the Authorization header value + the x-kotoba-did sidecar for a kotobase
    /pins or kotoba xrpc call: {:authorization \"CACAO <b64>\" :x-kotoba-did <iss>}."

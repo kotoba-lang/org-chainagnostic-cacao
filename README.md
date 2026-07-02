@@ -30,14 +30,55 @@ holder's OWN runtime, presented as an opaque `cacao_b64`, never a platform key.
   signature under the issuer did:key. Exception-safe — malformed input → `{:valid? false}`.
 - **`auth-header`** gives the `Authorization: CACAO …` + `x-kotoba-did` headers.
 
+## Delegation chains — `verify-chain`
+
+`verify-chain` verifies an ORDERED delegation chain — a vector of `cacao_b64`
+strings, root first, leaf last. Each link is a CACAO whose `aud` names the
+delegate; that delegate re-issues the next link with its own key:
+
+```clojure
+(cacao/verify-chain [root-b64 mid-b64 leaf-b64] {:now "2026-07-02T00:00:00Z"})
+;; => {:chain/valid? true
+;;     :chain/problems []
+;;     :chain/root-iss "did:key:z6Mk…"        ; root issuer (the delegating authority)
+;;     :chain/holder "did:key:z6Mk…"          ; leaf aud (who may present the chain)
+;;     :chain/resources #{"kotoba://cap/host/ledger-append/ledger:main"}
+;;     :chain/expires "2026-07-10T00:00:00Z"  ; min exp across the chain
+;;     :chain/depth 3}
+```
+
+Chain validity requires, per link and per parent→child pair:
+
+- **signature**: every link verifies under its own issuer did:key (`verify`);
+- **linkage**: child `iss` == parent payload `aud` — the delegate re-issues;
+- **attenuation**: child `resources` ⊆ parent `resources` under `covers?` —
+  exact string match, or a parent trailing-`*` wildcard
+  (`kotoba://cap/<kind>/*` covers `kotoba://cap/<kind>/<r>`). A child may only
+  narrow, never escalate;
+- **expiry ordering**: child `exp` <= parent `exp` when both are present;
+- **freshness** (optional `:now`): every link satisfies `iat <= now < exp`
+  (each bound enforced when the field is present), so expired or
+  not-yet-valid links reject the chain.
+
+On failure the result is `{:chain/valid? false :chain/problems [...]}` with
+per-link problem maps (`:chain/invalid-signature`, `:chain/broken-linkage`,
+`:chain/resource-escalation`, `:chain/expiry-extended`, `:chain/expired`,
+`:chain/not-yet-valid`, `:chain/malformed-input`). Malformed input never
+throws. `:chain/resources` is the LEAF's effective resource set — the
+narrowest scope in the chain — which downstream (crypto-free) layers such as
+`kotoba.lang.capability-cacao` map to capability grants.
+
 Built on **com-junkawasaki/ed25519-clj** (sign / did:key) +
 **com-junkawasaki/dag-cbor-clj** (order-preserving CBOR). No native deps,
 babashka-friendly.
 
 ## Correctness
 
-`bb test`: mint→verify round-trip + issuer binding, tamper rejection,
-SIWE plaintext shape, header shape → 4 tests / 31 assertions green.
+`bb test` / `clojure -M:test`: mint→verify round-trip + issuer binding, tamper
+rejection, SIWE plaintext shape, header shape, plus the delegation-chain suite
+(real minted 2- and 3-link chains, tampered middle link, resource escalation,
+expiry ordering, broken iss/aud linkage, `:now` freshness, malformed input)
+→ 14 tests / 89 assertions green.
 
 ## License
 
