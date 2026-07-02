@@ -2,7 +2,11 @@
  :deps {io.github.kotoba-lang/ed25519  {:local/root "../ed25519"}
         io.github.kotoba-lang/dag-cbor {:local/root "../dag-cbor"}}
  :tasks
- {test
-  {:task (do (require 'clojure.test 'cacao.core-test)
-             (let [r (clojure.test/run-tests 'cacao.core-test)]
+ {kotoba
+  {:doc "DID / CACAO / seed identity-primitives CLI. `bb kotoba help` for usage."
+   :requires ([kotoba.cli :as cli])
+   :task (apply cli/-main *command-line-args*)}
+  test
+  {:task (do (require 'clojure.test 'cacao.core-test 'kotoba.cli-test)
+             (let [r (clojure.test/run-tests 'cacao.core-test 'kotoba.cli-test)]
                (when (pos? (+ (:fail r) (:error r))) (System/exit 1))))}}}
