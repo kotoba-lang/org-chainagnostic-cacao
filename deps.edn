@@ -9,7 +9,7 @@
          :git/sha "fdcefb9f1b83461fee54d04b63e374fa301ee847"}
         io.github.kotoba-lang/org-ietf-cbor
         {:git/url "https://github.com/kotoba-lang/org-ietf-cbor.git"
-         :git/sha "9c60d5832b771f869b237f5ba20f0b6de57cde84"}}
+         :git/sha "de18ad29102f9df150e214d756de4719c3c00d7a"}}
  :aliases {;; Monorepo-local dev: resolve the siblings from the working-tree
            ;; checkouts (../org-ietf-ed25519, ../org-ietf-cbor) instead of git.
            ;; Compose with other aliases, e.g. `clojure -M:local:test`.
