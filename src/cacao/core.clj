@@ -66,22 +66,41 @@
                  ["s" (cbor/ordered [["t" "EdDSA"] ["s" sig-b64]])]]))]
     {:cacao-b64 (b64 cacao) :iss iss :siwe msg}))
 
+(defn- temporal-ok?
+  "true iff `now` (when given) falls within [iat, exp) of `payload`, each
+   bound enforced only when the corresponding field is present. Mirrors
+   verify-chain's own per-link temporal-problems logic exactly (iat <= now
+   < exp), so a single verify and a chained verify-chain reject the same
+   expired/not-yet-valid CACAO the same way."
+  [{:keys [iat exp]} now]
+  (or (nil? now)
+      (and (or (nil? iat) (not (pos? (compare iat now))))
+           (or (nil? exp) (neg? (compare now exp))))))
+
 (defn verify
   "Verify a base64 CACAO: decode the CBOR, reconstruct the SIWE plaintext from
-   `p`, and check the EdDSA signature under the issuer did:key (issuer binding).
+   `p`, and check the EdDSA signature under the issuer did:key (issuer
+   binding). OPTS may carry `:now` (an ISO-8601 instant string); when given,
+   the CACAO must also satisfy iat <= now < exp (each bound enforced when
+   the field is present) — an expired or not-yet-valid CACAO is rejected,
+   the same way verify-chain's :now option already rejects an expired/
+   not-yet-valid link (confirmed bug this closes: without :now, a CACAO
+   minted with any :exp, however long past, verified true forever — a
+   captured single-token CACAO could be replayed indefinitely).
    Returns {:valid? bool :iss did :payload {…}}."
-  [^String cacao-b64]
-  (try
-    (let [m (cbor/decode (unb64 cacao-b64))
-          p (get m "p") s (get m "s")
-          iss (get p "iss")
-          sig (unb64 (get s "s"))
-          payload {:iss iss :aud (get p "aud") :iat (get p "iat") :exp (get p "exp")
-                   :nonce (get p "nonce") :domain (get p "domain")
-                   :version (get p "version") :resources (get p "resources")}
-          valid? (ed/verify-did iss (.getBytes (siwe-message payload) "UTF-8") sig)]
-      {:valid? valid? :iss iss :payload payload})
-    (catch Exception _ {:valid? false})))
+  ([cacao-b64] (verify cacao-b64 nil))
+  ([^String cacao-b64 {:keys [now]}]
+   (try
+     (let [m (cbor/decode (unb64 cacao-b64))
+           p (get m "p") s (get m "s")
+           iss (get p "iss")
+           sig (unb64 (get s "s"))
+           payload {:iss iss :aud (get p "aud") :iat (get p "iat") :exp (get p "exp")
+                    :nonce (get p "nonce") :domain (get p "domain")
+                    :version (get p "version") :resources (get p "resources")}
+           sig-valid? (ed/verify-did iss (.getBytes (siwe-message payload) "UTF-8") sig)]
+       {:valid? (and sig-valid? (temporal-ok? payload now)) :iss iss :payload payload})
+     (catch Exception _ {:valid? false}))))
 
 ;; ── delegation chains ─────────────────────────────────────────────────────────
 

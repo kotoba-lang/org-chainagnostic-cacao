@@ -33,6 +33,32 @@
           tampered (.encodeToString (Base64/getEncoder) raw)]
       (is (false? (:valid? (cacao/verify tampered)))))))
 
+(deftest verify-without-now-does-not-check-expiry-unchanged-behavior
+  (let [{:keys [cacao-b64]} (cacao/mint (opts-for (seed)))]
+    (is (true? (:valid? (cacao/verify cacao-b64))) "1-arity call is unaffected by the :now feature")))
+
+(deftest verify-now-rejects-expired-and-not-yet-valid-cacaos
+  ;; CONFIRMED BUG regression: verify had no expiry-checking capability at
+  ;; all -- a CACAO with any :exp, however long past, verified true forever.
+  (let [s (seed)
+        {:keys [cacao-b64]} (cacao/mint {:seed s :aud "did:key:zAUD"
+                                         :iat "2026-06-27T00:00:00Z"
+                                         :exp "2026-07-27T00:00:00Z"
+                                         :nonce "n1" :resources ["r1"]})]
+    (testing "now within [iat, exp) verifies"
+      (is (true? (:valid? (cacao/verify cacao-b64 {:now "2026-07-01T00:00:00Z"})))))
+    (testing "now == exp is already expired (iat <= now < exp)"
+      (is (false? (:valid? (cacao/verify cacao-b64 {:now "2026-07-27T00:00:00Z"})))))
+    (testing "now well past exp is expired"
+      (is (false? (:valid? (cacao/verify cacao-b64 {:now "2030-01-01T00:00:00Z"})))))
+    (testing "before iat the CACAO is not yet valid"
+      (is (false? (:valid? (cacao/verify cacao-b64 {:now "2026-06-01T00:00:00Z"})))))
+    (testing "a tampered signature is still rejected even with a valid :now"
+      (let [raw (.decode (Base64/getDecoder) cacao-b64)
+            _ (aset-byte raw (dec (count raw)) (unchecked-byte (bit-xor (aget raw (dec (count raw))) 1)))
+            tampered (.encodeToString (Base64/getEncoder) raw)]
+        (is (false? (:valid? (cacao/verify tampered {:now "2026-07-01T00:00:00Z"}))))))))
+
 (deftest siwe-shape
   (let [s (seed) iss (ed/did-key-from-seed s)
         msg (cacao/siwe-message {:iss iss :aud "did:key:zAUD" :iat "T0" :exp "T1"
