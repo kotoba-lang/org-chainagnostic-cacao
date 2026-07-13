@@ -23,6 +23,15 @@
       (is (= iss (:iss v)))
       (is (= ["kotoba://can/kotobase:pin" "kotoba://graph/g"] (:resources (:payload v)))))))
 
+(deftest mint-requires-a-nonce
+  ;; mint's own docstring lists :nonce as "Required" -- this proves it's
+  ;; actually enforced: a CACAO minted without one has no replay protection
+  ;; at all (verify/verify-chain's `(or (nil? nonce) ...)` fallback treats a
+  ;; nonce-less payload as un-dedupeable, not as replay-safe), so silently
+  ;; allowing a nonce-less mint would be a footgun.
+  (is (thrown? clojure.lang.ExceptionInfo
+               (cacao/mint (dissoc (opts-for (seed)) :nonce)))))
+
 (deftest tamper-is-rejected
   (let [{:keys [cacao-b64]} (cacao/mint (opts-for (seed)))
         m (cacao/verify cacao-b64)]
@@ -320,6 +329,44 @@
     (is (true? (:chain/valid? (cacao/verify-chain chain)))
         (str "replaying the SAME chain a second time with no store ALSO verifies true — "
              "proof the default fallback provides no cross-call replay protection"))))
+
+(deftest premature-or-stale-presentation-does-not-burn-the-nonce
+  ;; CONFIRMED BUG regression (independent review of this PR): nonce-problems
+  ;; used to gate recording ONLY on signature validity (links' :valid?, which
+  ;; never reflected temporal bounds since the per-link `verify` inside
+  ;; verify-chain is called with no :now) -- so a validly-signed but
+  ;; not-yet-valid or already-expired link still burned its nonce against
+  ;; the real persistent store, permanently locking out the legitimate
+  ;; holder from ever presenting that exact chain again once it actually
+  ;; became valid. This proves a not-yet-valid presentation is correctly
+  ;; rejected WITHOUT side-effecting the store, so the later, genuinely
+  ;; valid presentation still succeeds.
+  (let [store (cacao/fresh-nonce-store)
+        root (mint-link seed-a did-b [wildcard])
+        leaf (mint-link seed-b did-c [ledger-main])
+        chain [root leaf]]
+    (testing "presented before iat: rejected as not-yet-valid"
+      (let [r (cacao/verify-chain chain {:now "2026-06-01T00:00:00Z" :nonce-store store})]
+        (is (false? (:chain/valid? r)))
+        (is (every? #(= :chain/not-yet-valid (:problem %)) (:chain/problems r)))))
+    (testing "presented again later, now genuinely within the valid window: must succeed"
+      (let [r (cacao/verify-chain chain {:now "2026-07-01T00:00:00Z" :nonce-store store})]
+        (is (true? (:chain/valid? r))
+            "the earlier not-yet-valid presentation must not have burned the nonce")))))
+
+(deftest expired-presentation-also-does-not-burn-the-nonce
+  (let [store (cacao/fresh-nonce-store)
+        root (mint-link seed-a did-b [wildcard])
+        leaf (mint-link seed-b did-c [ledger-main])
+        chain [root leaf]]
+    (testing "presented after exp: rejected as expired"
+      (let [r (cacao/verify-chain chain {:now "2026-07-27T00:00:00Z" :nonce-store store})]
+        (is (false? (:chain/valid? r)))
+        (is (every? #(= :chain/expired (:problem %)) (:chain/problems r)))))
+    (testing "presented again within the (already past) valid window: must still succeed --
+              proves the expired presentation didn't burn the nonce either"
+      (let [r (cacao/verify-chain chain {:now "2026-07-01T00:00:00Z" :nonce-store store})]
+        (is (true? (:chain/valid? r)))))))
 
 (deftest malformed-chain-input-never-throws
   (doseq [garbage [nil 42 "b64" {} [] [nil] [42] ["not-b64!!!"] ["" ""]]]

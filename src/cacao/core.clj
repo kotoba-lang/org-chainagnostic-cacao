@@ -59,6 +59,12 @@
    (default kotoba.etzhayyim.com) :version (default \"1\") :statement."
   [{:keys [seed aud iat exp nonce resources statement domain version]
     :or {domain "kotoba.etzhayyim.com" version "1"}}]
+  (when (nil? nonce)
+    (throw (ex-info "cacao/mint: :nonce is required — verify/verify-chain's
+                     nonce-replay protection has no effect on a CACAO minted
+                     without one (a nonce-less payload is treated as
+                     un-dedupeable, not as replay-safe)"
+                    {:aud aud})))
   (let [iss (ed/did-key-from-seed seed)
         msg (siwe-message {:iss iss :aud aud :iat iat :exp exp :nonce nonce
                            :domain domain :version version :statement statement
@@ -261,15 +267,26 @@
    call (see verify-chain's :nonce-store opt), so two links of the SAME
    chain that share an `[iss nonce]` are caught too, not only replay across
    separate verify-chain calls. Only checked for a link whose own signature
-   already verified (`(:valid? (links i))`): an unsigned/tampered link's
-   `nonce` field isn't authentic (nonce lives inside the signed SIWE
-   plaintext) and must not be allowed to burn a real one — see `verify`'s
-   own :nonce-store gating for the same rationale."
-  [links payloads store]
+   already verified (`(:valid? (links i))`) AND whose temporal bounds are
+   satisfied at NOW (`temporal-ok?`, same iat<=now<exp rule
+   `temporal-problems` enforces): an unsigned/tampered link's `nonce` field
+   isn't authentic (nonce lives inside the signed SIWE plaintext) and must
+   not be allowed to burn a real one — see `verify`'s own :nonce-store
+   gating for the same rationale. The temporal half of this gate matters
+   because `links` (built by `verify-chain` via a bare, no-`:now` `verify`
+   call per link) only reflects SIGNATURE validity, never temporal
+   validity — without checking `temporal-ok?` here too, a validly-signed
+   but not-yet-valid or already-expired link would still burn its nonce
+   against the real STORE (even though the overall chain is correctly
+   rejected via `temporal-problems`), permanently locking out the
+   legitimate holder from ever presenting that same chain again once it
+   actually becomes valid."
+  [links payloads store now]
   (keep-indexed
-   (fn [i {:keys [iss nonce]}]
+   (fn [i {:keys [iss nonce] :as payload}]
      (when (and nonce
                 (:valid? (nth links i))
+                (temporal-ok? payload now)
                 (not (check-and-record! store [iss nonce])))
        {:problem :chain/nonce-replay :index i :nonce nonce}))
    payloads))
@@ -327,7 +344,7 @@
              store (or nonce-store (fresh-nonce-store))
              problems (vec (concat (signature-problems links)
                                    (temporal-problems payloads now)
-                                   (nonce-problems links payloads store)
+                                   (nonce-problems links payloads store now)
                                    (mapcat (fn [i]
                                              (link-problems (payloads i)
                                                             (payloads (inc i))
