@@ -18,6 +18,13 @@
 ;;                :resources ["kotoba://can/kotobase:pin" (str "kotoba://graph/" did)]})
 ;;   ;=> {:cacao-b64 "…" :iss "did:key:z6Mk…" :siwe "…"}
 ;;   (cacao/verify cacao-b64)  ;=> {:valid? true :iss "did:key:z6Mk…" :payload {…}}
+;;
+;;   ;; nonce-replay protection: hold on to a store across calls to actually
+;;   ;; reject a replayed CACAO (see `verify`'s :nonce-store doc for why the
+;;   ;; default, store-omitted arity can't do this on its own).
+;;   (def store (cacao/fresh-nonce-store))
+;;   (cacao/verify cacao-b64 {:nonce-store store})  ;=> {:valid? true ...}
+;;   (cacao/verify cacao-b64 {:nonce-store store})  ;=> {:valid? false ...} (replay)
 (ns cacao.core
   (:require [clojure.string :as str]
             [ed25519.core :as ed]
@@ -77,19 +84,108 @@
       (and (or (nil? iat) (not (pos? (compare iat now))))
            (or (nil? exp) (neg? (compare now exp))))))
 
+;; ── nonce-replay protection ─────────────────────────────────────────────────
+;;
+;; SECURITY FIX: `verify`/`verify-chain` mint/embed a `nonce` (see `mint`,
+;; `siwe-message`) but, until this addition, NEVER checked it against
+;; anything — a valid, unexpired CACAO captured anywhere (logs, network
+;; transit, a compromised intermediate) could be replayed verbatim any
+;; number of times until its `exp`. The old Rust implementation of this same
+;; trust boundary had a sharded NonceStore for exactly this (see
+;; kotoba-lang/kotoba CLAUDE.md: "NonceStore: RwLock<HashMap> → DashMap", a
+;; 64-way sharded in-memory nonce table with a bounded MAX_NONCES and
+;; expiry-driven eviction); that protection was lost when the Rust code was
+;; retired in favor of this Clojure reimplementation, which never replaced
+;; it. This closes that gap.
+;;
+;; This is a LIBRARY, not a service: callers range from a one-shot CLI
+;; invocation (`kotoba run --cacao`) to a long-running server. So the store
+;; is caller-pluggable — `NonceStore` is a two-line protocol, not a
+;; hardcoded implementation — and this library only owns the check/record
+;; CONTRACT, never where (if anywhere) it's persisted. A plain Clojure atom
+;; satisfies the protocol out of the box (in-memory, single-process); a host
+;; wanting cross-process / cross-restart protection extends the protocol
+;; on its own durable type (Redis, a DB row with a UNIQUE constraint, …) and
+;; passes an instance of it via the `:nonce-store` opt.
+;;
+;; The key checked/recorded is always the 2-vector `[iss nonce]`, never the
+;; bare nonce string: a nonce is only meaningful scoped to the issuer that
+;; chose it (mint doesn't coordinate nonces across issuers), so two
+;; DIFFERENT issuers coincidentally minting with the same nonce string is
+;; not a replay and must not collide in the store.
+
+(defprotocol NonceStore
+  "A guard against CACAO replay. `check-and-record!` MUST be a single atomic
+   test-and-set — test whether REPLAY-KEY (a `[iss nonce]` vector) has been
+   seen before and, if not, record it as seen, in one indivisible step. (A
+   separate `seen?` + `record!` pair would TOCTOU-race: two concurrent
+   callers could both observe \"not seen\" and both proceed.) Returns:
+
+     true  — REPLAY-KEY was fresh (not seen before) and is now recorded;
+             the caller should treat the CACAO as not-a-replay.
+     false — REPLAY-KEY was already recorded; the caller MUST reject (this
+             is either a genuine replay, or two independent CACAOs that
+             happen to share both `iss` and `nonce`, which mint never
+             promises won't happen if the caller reuses nonces)."
+  (check-and-record! [store replay-key]))
+
+(extend-protocol NonceStore
+  clojure.lang.Atom
+  (check-and-record! [store replay-key]
+    ;; swap-vals! is a single atomic operation: the returned `old` is
+    ;; guaranteed to be the pre-swap value actually observed by THIS swap,
+    ;; so `contains?` on it is race-free (unlike a separate deref + swap!).
+    (let [[old _new] (swap-vals! store conj replay-key)]
+      (not (contains? old replay-key)))))
+
+(defn fresh-nonce-store
+  "A fresh, empty, in-memory NonceStore: an atom over a set of `[iss nonce]`
+   keys. Thread-safe for concurrent callers WITHIN one process (backed by
+   swap-vals!, atomic) but pure in-memory state — NOT persisted, NOT shared
+   across processes, and gone the moment this atom is garbage-collected.
+   `verify`/`verify-chain` call this to synthesize a THROWAWAY store when the
+   caller doesn't pass `:nonce-store`; keep a reference to one yourself (or
+   your own NonceStore impl) and pass it explicitly for real replay
+   protection across calls."
+  [] (atom #{}))
+
 (defn verify
   "Verify a base64 CACAO: decode the CBOR, reconstruct the SIWE plaintext from
    `p`, and check the EdDSA signature under the issuer did:key (issuer
-   binding). OPTS may carry `:now` (an ISO-8601 instant string); when given,
-   the CACAO must also satisfy iat <= now < exp (each bound enforced when
-   the field is present) — an expired or not-yet-valid CACAO is rejected,
-   the same way verify-chain's :now option already rejects an expired/
-   not-yet-valid link (confirmed bug this closes: without :now, a CACAO
-   minted with any :exp, however long past, verified true forever — a
-   captured single-token CACAO could be replayed indefinitely).
+   binding). OPTS may carry:
+
+     `:now`          an ISO-8601 instant string; when given, the CACAO must
+                      also satisfy iat <= now < exp (each bound enforced
+                      when the field is present) — an expired or
+                      not-yet-valid CACAO is rejected, the same way
+                      verify-chain's :now option already rejects an
+                      expired/not-yet-valid link (confirmed bug this closed:
+                      without :now, a CACAO minted with any :exp, however
+                      long past, verified true forever — a captured
+                      single-token CACAO could be replayed indefinitely).
+
+     `:nonce-store`  a NonceStore (see that protocol + `fresh-nonce-store`)
+                      used to reject a REPLAYED CACAO: once a CACAO's
+                      `[iss nonce]` has been recorded as seen against
+                      STORE, presenting that same CACAO (or any other CACAO
+                      sharing that iss+nonce) again is rejected. Only
+                      recorded when the CACAO is otherwise fully valid (sig
+                      + temporal) — an invalid/tampered CACAO can't be used
+                      to pre-emptively burn a nonce that hasn't really been
+                      used yet. When OMITTED, a FRESH throwaway store
+                      (`fresh-nonce-store`) is used for this call only:
+                      this can never reject anything (there is nothing it
+                      could have seen before) and provides NO real replay
+                      protection across calls — it exists only so this
+                      arity stays crash-free for callers that haven't wired
+                      up a store yet. Pass a store you retain across calls
+                      (module-level, request-scoped, or a durable NonceStore
+                      impl) for actual protection; see the CACAO README's
+                      nonce-replay section.
+
    Returns {:valid? bool :iss did :payload {…}}."
   ([cacao-b64] (verify cacao-b64 nil))
-  ([^String cacao-b64 {:keys [now]}]
+  ([^String cacao-b64 {:keys [now nonce-store]}]
    (try
      (let [m (cbor/decode (unb64 cacao-b64))
            p (get m "p") s (get m "s")
@@ -98,8 +194,17 @@
            payload {:iss iss :aud (get p "aud") :iat (get p "iat") :exp (get p "exp")
                     :nonce (get p "nonce") :domain (get p "domain")
                     :version (get p "version") :resources (get p "resources")}
-           sig-valid? (ed/verify-did iss (.getBytes (siwe-message payload) "UTF-8") sig)]
-       {:valid? (and sig-valid? (temporal-ok? payload now)) :iss iss :payload payload})
+           sig-valid? (ed/verify-did iss (.getBytes (siwe-message payload) "UTF-8") sig)
+           temporal-valid? (temporal-ok? payload now)]
+       (if (and sig-valid? temporal-valid?)
+         (let [nonce (:nonce payload)
+               store (or nonce-store (fresh-nonce-store))
+               ;; no :nonce on the payload → nothing to dedupe on, treat as
+               ;; not-a-replay (mint always sets one; this only matters for
+               ;; a hand-crafted CACAO that omits it).
+               fresh? (or (nil? nonce) (check-and-record! store [iss nonce]))]
+           {:valid? fresh? :iss iss :payload payload})
+         {:valid? false :iss iss :payload payload}))
      (catch Exception _ {:valid? false}))))
 
 ;; ── delegation chains ─────────────────────────────────────────────────────────
@@ -150,6 +255,25 @@
                {:problem :chain/expiry-extended :index ci
                 :parent-exp (:exp parent) :child-exp (:exp child)})])))
 
+(defn- nonce-problems
+  "Nonce-replay problems across the chain's LINKS/PAYLOADS, checked against
+   STORE — the SAME store instance for every link of this one verify-chain
+   call (see verify-chain's :nonce-store opt), so two links of the SAME
+   chain that share an `[iss nonce]` are caught too, not only replay across
+   separate verify-chain calls. Only checked for a link whose own signature
+   already verified (`(:valid? (links i))`): an unsigned/tampered link's
+   `nonce` field isn't authentic (nonce lives inside the signed SIWE
+   plaintext) and must not be allowed to burn a real one — see `verify`'s
+   own :nonce-store gating for the same rationale."
+  [links payloads store]
+  (keep-indexed
+   (fn [i {:keys [iss nonce]}]
+     (when (and nonce
+                (:valid? (nth links i))
+                (not (check-and-record! store [iss nonce])))
+       {:problem :chain/nonce-replay :index i :nonce nonce}))
+   payloads))
+
 (defn verify-chain
   "Verify an ordered CACAO delegation chain (root first, leaf last), given as a
    vector of base64 CACAO strings. Chain validity requires:
@@ -159,11 +283,29 @@
      delegate: child `iss` == parent payload `aud`;
    - the child's `resources` are a subset of the parent's under `covers?`
      (exact string match, or a parent trailing-`*` wildcard);
-   - child `exp` <= parent `exp` when both are present.
+   - child `exp` <= parent `exp` when both are present;
+   - no link's `[iss nonce]` has been seen before, per `:nonce-store` (see
+     below) — a replayed link rejects the whole chain.
 
-   OPTS may carry `:now` (an ISO-8601 instant string); when given, every link
-   must satisfy iat <= now < exp (each bound enforced when the field is
-   present), so expired or not-yet-valid links reject the chain.
+   OPTS may carry:
+
+     `:now`          an ISO-8601 instant string; when given, every link must
+                      satisfy iat <= now < exp (each bound enforced when the
+                      field is present), so expired or not-yet-valid links
+                      reject the chain.
+
+     `:nonce-store`  a NonceStore (see that protocol + `fresh-nonce-store`
+                      in this ns) checked/recorded for every link's
+                      `[iss nonce]`. When OMITTED, a FRESH throwaway store
+                      is synthesized for JUST this call: it still catches
+                      two links of the SAME chain sharing an iss+nonce, but
+                      — being discarded when the call returns — provides NO
+                      protection against the same chain (or a link from it)
+                      being presented again in a LATER verify-chain call.
+                      Pass a store you retain across calls for that; see
+                      the CACAO README's nonce-replay section. (This is the
+                      same fresh-per-call fallback `verify` uses, and the
+                      same caveat applies.)
 
    Returns {:chain/valid? bool :chain/problems [{:problem ..} ...]
             :chain/root-iss <root issuer did> :chain/holder <leaf aud>
@@ -172,7 +314,7 @@
             :chain/depth <link count>}.
    Malformed input never throws — it yields {:chain/valid? false ...}."
   ([chain] (verify-chain chain nil))
-  ([chain {:keys [now]}]
+  ([chain {:keys [now nonce-store]}]
    (try
      (if-not (and (sequential? chain) (seq chain) (every? string? chain))
        {:chain/valid? false
@@ -182,8 +324,10 @@
         :chain/depth (if (sequential? chain) (count chain) 0)}
        (let [links (mapv verify chain)
              payloads (mapv :payload links)
+             store (or nonce-store (fresh-nonce-store))
              problems (vec (concat (signature-problems links)
                                    (temporal-problems payloads now)
+                                   (nonce-problems links payloads store)
                                    (mapcat (fn [i]
                                              (link-problems (payloads i)
                                                             (payloads (inc i))
