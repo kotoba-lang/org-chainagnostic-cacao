@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "scripts": {
+    "task": "nbb scripts/run-task.cljs",
+    "tasks": "nbb scripts/run-task.cljs"
+  }
+}
