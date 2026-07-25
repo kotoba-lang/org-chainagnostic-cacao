@@ -145,6 +145,31 @@ $ bin/kotoba cacao --seed "AAECAwQF…=" --aud did:key:zNODE \
 `--resource` is repeatable; `--ttl-h` defaults to 24; `--nonce` defaults to
 random. `bin/kotoba help` prints full usage.
 
+## Edge namespaces (`cacao.edge.*`, CLJS-only)
+
+`cacao.core` is portable `.cljc`, but its `:cljs` branch targets **Node**
+(`js/Buffer`, `ed25519.core`'s synchronous `node:crypto`). A Cloudflare
+Workers isolate has neither, so a Worker cannot use it. `cacao.edge.*` is the
+Worker-native half — WebCrypto (`crypto.subtle` Ed25519), zero npm, with
+hand-ported base58btc and definite-length CBOR because those have no WebCrypto
+equivalent:
+
+| ns | role |
+|---|---|
+| `cacao.edge.verify` | verify a presented CACAO (signature + temporal window). Returns a Promise. |
+| `cacao.edge.mint` | mint a CACAO from a `sign-fn` (msg-bytes → Promise\<sig-bytes\>), for the WebAuthn-passkey → server-held did:key bridge. Returns a Promise. |
+| `cacao.edge.base58` / `cacao.edge.cbor` | the wire pieces both of the above need. |
+
+Both halves produce and accept the same wire format — a CACAO minted on the
+JVM by `cacao.core/mint` verifies at the edge and vice versa
+(`test/edge_smoke.cljs` covers the edge round trip; run it with
+`nbb --classpath src:test test/edge_smoke.cljs` on Node ≥ 20).
+
+A CACAO minted by `cacao.edge.mint` is **server-custodied, passkey-gated** —
+not a non-custodial wallet. `cacao.edge.verify` cannot tell the two apart
+(that is the point: the API surface needs no changes), so the custody model
+must be documented by whoever mints, not detected by whoever verifies.
+
 ## Correctness
 
 `bb test` / `clojure -M:test`: mint→verify round-trip + issuer binding, tamper
