@@ -61,8 +61,10 @@
                                                                    "AAAAAAA=")
                                                               (+ now 60))
                                                (mint-at kp did {:iat now :exp (+ now 3600)
-                                                                :resources resources :nonce "n2"})])))
-                                (.then (fn [[fresh expired tampered other]]
+                                                                :resources resources :nonce "n2"})
+                                               (mint-at kp did {:iat now :resources resources
+                                                                :nonce "n3"})])))
+                                (.then (fn [[fresh expired tampered other no-exp]]
                                          (check! "fresh CACAO verifies" (true? (aget fresh "valid")))
                                          (check! "verified iss is the minting did"
                                                  (= did (aget fresh "iss")))
@@ -75,10 +77,20 @@
                                                       (= "expired CACAO" (aget expired "error"))))
                                          (check! "tampered blob is rejected"
                                                  (false? (aget tampered "valid")))
-                                         (-> (verify/verify (:cacao-b64 other) (+ now 60))
-                                             (.then (fn [r]
-                                                      (check! "a second mint from the same key also verifies"
-                                                              (true? (aget r "valid")))))))))))))))
+                                         (check! "replayUntil of an exp-bearing CACAO is its exp"
+                                                 (= (+ now 3600) (aget fresh "replayUntil")))
+                                         (js/Promise.all
+                                          #js [(verify/verify (:cacao-b64 other) (+ now 60))
+                                               (verify/verify (:cacao-b64 no-exp) (+ now 60))])))
+                                (.then (fn [[r no-exp-verified]]
+                                         (check! "a second mint from the same key also verifies"
+                                                 (true? (aget r "valid")))
+                                         ;; A no-exp CACAO stays presentable for the full
+                                         ;; max-age fallback, so a nonce store must remember
+                                         ;; it that long -- not for a TTL of its own choosing.
+                                         (check! "replayUntil of a no-exp CACAO is iat + max-age"
+                                                 (= (+ now verify/max-age-sec)
+                                                    (aget no-exp-verified "replayUntil"))))))))))))
     (.then (fn [_]
              (if (seq @failures)
                (do (js/console.error "FAILED:" (count @failures))

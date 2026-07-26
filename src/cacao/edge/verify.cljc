@@ -76,6 +76,28 @@
 
 (defn now-sec [] (js/Math.floor (/ (js/Date.now) 1000)))
 
+(defn replay-until-sec
+  "The last unix second at which this CACAO can still be presented, so a
+  replay-protection store knows how long it must remember the nonce.
+
+  A nonce row evicted while the CACAO is still inside its temporal window
+  turns replay protection OFF for the rest of that window: the same captured
+  envelope verifies again and claims a fresh row. So this is derived from the
+  same two rules `temporal-error` enforces -- `exp` when present, otherwise
+  `iat` + `max-age-sec` -- and NOT from a TTL the store picks for itself. A
+  store that keeps nonces for its own convenient interval (10 minutes, say)
+  while accepting a 7-day no-exp CACAO has a replay hole exactly that CACAO's
+  remaining lifetime wide.
+
+  nil when `iat` is unparseable; `verify` rejects those before this matters."
+  [payload]
+  (let [iat-sec (parse-utc-seconds (aget payload "iat"))
+        exp-sec (parse-utc-seconds (aget payload "exp"))]
+    (cond
+      exp-sec exp-sec
+      iat-sec (+ iat-sec max-age-sec)
+      :else nil)))
+
 (defn base64->bytes
   "Public (not `-`) so cloud-itonami.edge.webauthn can decode its
   standard-base64 KV-stored fields (pubKeyB64/wrappedPrivB64/ivB64, all
@@ -171,6 +193,7 @@
                                (not sig-valid?) #js {:valid false :iss iss}
                                resources-err #js {:valid false :error resources-err :iss iss}
                                temporal-err #js {:valid false :error temporal-err :iss iss}
-                               :else #js {:valid true :iss iss :payload payload})))))))))
+                               :else #js {:valid true :iss iss :payload payload
+                                          :replayUntil (replay-until-sec payload)})))))))))
        (.catch (fn [error]
                  #js {:valid false :error (aget error "message")})))))
