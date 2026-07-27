@@ -270,6 +270,16 @@
                ;; The gap this suite exists to make visible.
                :reason-visible? (boolean (some :result/reason results))}}))
 
+(defn- pad
+  "Left-justify S to WIDTH. Replaces `format`'s %-Ns, which is :clj-only --
+  this namespace is .cljc and clj-kondo rightly rejected `format` as
+  unresolved for the :cljs branch, leaving CI red."
+  [s width]
+  (let [s (str s)]
+    (if (<= width (count s))
+      s
+      (str s (apply str (repeat (- width (count s)) " "))))))
+
 (defn report
   "The run, as lines a human reads in a terminal."
   [{:keys [results summary]}]
@@ -277,18 +287,16 @@
    "\n"
    (concat
     (for [r results]
-      (format "%-28s %-9s %-8s %s"
-              (name (:case/id r))
-              (name (or (:result/outcome r) :?))
-              (case (:result/agrees? r)
-                :measured "measured"
-                true      "ok"
-                "DISAGREE")
-              (or (:result/reason r) "")))
+      (str (pad (name (:case/id r)) 28) " "
+           (pad (name (or (:result/outcome r) :?)) 9) " "
+           (pad (case (:result/agrees? r)
+                  :measured "measured"
+                  true      "ok"
+                  "DISAGREE") 8) " "
+           (or (:result/reason r) "")))
     [""
-     (format "%d checked, %d agree, %d disagree, %d measured"
-             (:checked summary) (:agree summary)
-             (:disagree summary) (:measured summary))
+     (str (:checked summary) " checked, " (:agree summary) " agree, "
+          (:disagree summary) " disagree, " (:measured summary) " measured")
      (if (:reason-visible? summary)
        "rejections carry a reason"
        "rejections carry NO reason — every cause looks identical from outside")])))
