@@ -373,3 +373,73 @@
     (let [r (cacao/verify-chain garbage)]
       (is (false? (:chain/valid? r)) (pr-str garbage))
       (is (seq (:chain/problems r)) (pr-str garbage)))))
+
+;; ── kotobase.net apex profile ────────────────────────────────────────────────
+;; Each of these corresponds to a check in net-kotobase's
+;; `kotobase.edge-cacao/validate-cacao`. They exist because three separate
+;; hand-rolled copies of this mint drifted from that file and every drift
+;; surfaced as the same opaque 401 (ADR-2607275000).
+
+(def ^:private apex-seed (byte-array (repeat 32 (byte 7))))
+
+(defn- apex-mint [& [over]]
+  (cacao/mint-kotobase-apex (merge {:seed apex-seed
+                                    :nonce "n-apex-1"
+                                    :iat "2026-07-27T10:15:30Z"
+                                    :exp "2026-07-27T10:20:30Z"}
+                                   over)))
+
+(deftest apex-mint-carries-pin-and-an-issuer-did-graph-scope
+  (let [{:keys [cacao-b64 iss]} (apex-mint)
+        rs (:resources (:payload (cacao/verify cacao-b64)))]
+    (is (some #{"kotoba://can/kotobase:pin"} rs))
+    (is (some #{(str "kotoba://graph/" iss)} rs)
+        "the scope is the ISSUER DID -- a graph-CID scope is rejected by the apex")))
+
+(deftest apex-op-caps-ride-along-without-displacing-the-required-two
+  (let [{:keys [cacao-b64 iss]} (apex-mint {:op-caps ["datom:read" "tx:create"]})
+        rs (:resources (:payload (cacao/verify cacao-b64)))]
+    (is (= ["kotoba://can/kotobase:pin"
+            "kotoba://can/datom:read"
+            "kotoba://can/tx:create"
+            (str "kotoba://graph/" iss)]
+           (vec rs)))))
+
+(deftest apex-mint-refuses-a-timestamp-the-apex-cannot-parse
+  (testing "THE bug this profile exists for. `(str (Instant/now))` renders
+            nanoseconds when they are non-zero, so most mints were rejected and
+            the ones landing on a whole second passed -- an intermittent auth
+            failure that reads as a flaky network. Refusing at mint time turns
+            an opaque 401 into a message naming the field."
+    (is (thrown? clojure.lang.ExceptionInfo (apex-mint {:iat "2026-07-27T10:15:30.123456789Z"})))
+    (is (thrown? clojure.lang.ExceptionInfo (apex-mint {:iat "1785140000"})))
+    (is (thrown? clojure.lang.ExceptionInfo (apex-mint {:exp "2026-07-27T10:20:30.5Z"})))
+    (is (some? (:cacao-b64 (apex-mint))) "seconds precision passes")))
+
+(deftest apex-instant-predicate-matches-only-the-apex-format
+  (is (cacao/apex-instant-ok? "2026-07-27T10:15:30Z"))
+  (is (not (cacao/apex-instant-ok? "2026-07-27T10:15:30.1Z")))
+  (is (not (cacao/apex-instant-ok? "2026-07-27T10:15:30+09:00")))
+  (is (not (cacao/apex-instant-ok? "1785140000")))
+  (is (not (cacao/apex-instant-ok? nil))))
+
+(deftest apex-mint-refuses-a-missing-nonce
+  (testing "the edge records nonces for replay protection; a mint without one
+            is not replay-safe, it is un-dedupeable"
+    (is (thrown? clojure.lang.ExceptionInfo (apex-mint {:nonce ""})))
+    (is (thrown? clojure.lang.ExceptionInfo (apex-mint {:nonce nil})))))
+
+(deftest apex-envelope-header-is-caip122
+  (testing "a comment in one of the drifted copies asserted the apex wanted NO
+            `h` field at all; that was true of the pre-cutover pod"
+    (let [{:keys [cacao-b64]} (apex-mint)]
+      (is (:valid? (cacao/verify cacao-b64)))
+      (is (= "caip122" (get (cacao/envelope-header cacao-b64) "t"))))))
+
+(deftest a-generic-mint-still-says-eip4361
+  (testing "the profile is additive; existing callers are untouched"
+    (let [{:keys [cacao-b64]} (cacao/mint {:seed apex-seed :aud "did:web:x"
+                                           :nonce "n" :iat "2026-07-27T10:15:30Z"
+                                           :exp "2026-07-27T10:20:30Z"
+                                           :resources ["kotoba://can/x"]})]
+      (is (= "eip4361" (get (cacao/envelope-header cacao-b64) "t"))))))

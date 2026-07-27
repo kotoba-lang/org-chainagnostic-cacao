@@ -68,8 +68,10 @@
   "Mint a CACAO signed with a raw 32-byte Ed25519 seed. `iss` is DERIVED from the
    seed (issuer binding) — never passed in. Returns {:cacao-b64 :iss :siwe}.
    Required opts: :seed :aud :iat :exp :nonce :resources. Optional: :domain
-   (default kotoba.etzhayyim.com) :version (default \"1\") :statement."
-  [{:keys [seed aud iat exp nonce resources statement domain version]
+   (default kotoba.etzhayyim.com) :version (default \"1\") :statement
+   :header-type (default \"eip4361\"; the kotobase apex wants \"caip122\" —
+   see `mint-kotobase-apex`, which is what callers targeting it should use)."
+  [{:keys [seed aud iat exp nonce resources statement domain version header-type]
     :or {domain "kotoba.etzhayyim.com" version "1"}}]
   (when (nil? nonce)
     (throw (ex-info "cacao/mint: :nonce is required — verify/verify-chain's
@@ -84,12 +86,102 @@
         sig-b64 (b64 (ed/sign seed (utf8-bytes msg)))
         cacao (cbor/encode
                (cbor/ordered
-                [["h" (cbor/ordered [["t" "eip4361"]])]
+                [["h" (cbor/ordered [["t" (or header-type "eip4361")]])]
                  ["p" (cbor/ordered [["iss" iss] ["aud" aud] ["iat" iat] ["exp" exp]
                                      ["nonce" nonce] ["domain" domain] ["version" version]
                                      ["resources" (vec resources)]])]
                  ["s" (cbor/ordered [["t" "EdDSA"] ["s" sig-b64]])]]))]
     {:cacao-b64 (b64 cacao) :iss iss :siwe msg}))
+
+
+;; ── kotobase.net apex profile ───────────────────────────────────────────────
+;;
+;; The apex (net-kotobase clj-edge, cutover 2026-07-08) accepts a NARROWER
+;; shape than a generic CACAO, and every one of its rejections is the same
+;; opaque `{"ok":false,"error":"Unauthorized"}`. That opacity is why this
+;; profile exists here rather than in each caller: three separate copies of a
+;; hand-rolled mint drifted from it, and `kagi push`/`pull` were dead against
+;; the live apex for as long as kagi carried one (ADR-2607275000).
+;;
+;; The rules, each read from `kotobase.edge-cacao/validate-cacao`:
+;;
+;;   1. `kotoba://can/kotobase:pin` must be among the resources.
+;;   2. A `kotoba://graph/` scope must be present and EQUAL THE ISSUER DID.
+;;      A graph-CID scope is rejected; the request body still names the CID.
+;;   3. `iat`/`exp` must match ^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$ —
+;;      `parse-utc-seconds` accepts NOTHING else. Not epoch seconds, not a
+;;      fractional part.
+;;   4. The envelope header is "caip122".
+;;   5. A fresh nonce per request; the edge records them for replay protection.
+
+(def kotobase-pin-capability "kotoba://can/kotobase:pin")
+(def kotobase-apex-aud "did:web:kotobase.net")
+(def kotobase-apex-domain "kotobase.net")
+
+(def ^:private apex-instant-re #"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+
+(defn apex-instant-ok?
+  "Does this timestamp match the ONLY format the apex parses?
+
+  Exposed because the failure it prevents is invisible: a value the apex
+  cannot parse produces a plain 401, indistinguishable from a bad signature,
+  an unknown DID, or a replayed nonce."
+  [t]
+  (boolean (and (string? t) (re-matches apex-instant-re t))))
+
+(defn kotobase-apex-resources
+  "The resource vector the apex requires, for issuer `did`.
+
+  `op-caps` ride along as extra `kotoba://can/` entries; the pin capability
+  and the issuer-DID graph scope are not optional and are added regardless."
+  ([did] (kotobase-apex-resources did nil))
+  ([did op-caps]
+   (into [kotobase-pin-capability]
+         (conj (mapv #(str "kotoba://can/" %) (remove nil? op-caps))
+               (str "kotoba://graph/" did)))))
+
+(defn envelope-header
+  "The `h` field of a minted CACAO, WITHOUT verifying it.
+
+  `verify` returns the payload and the issuer, not the envelope header — but
+  the header is one of the things the apex reads, and a caller that ships the
+  wrong one gets the same opaque 401 as every other mistake. Exposed so a test
+  can assert it."
+  [cacao-b64]
+  (get (cbor/decode (unb64 cacao-b64)) "h"))
+
+(defn mint-kotobase-apex
+  "Mint a CACAO the kotobase.net apex accepts, or THROW.
+
+  Refuses at mint time rather than letting the apex refuse at request time,
+  because the apex's refusal carries no reason. A caller that gets a CACAO
+  back from this function has one the apex will not reject for shape.
+
+  Required: `:seed` (32-byte Ed25519), `:nonce` (fresh per request),
+  `:iat`/`:exp` as `YYYY-MM-DDTHH:MM:SSZ`. Optional: `:op-caps`
+  (e.g. [\"datom:read\"]), `:aud`, `:domain`.
+
+  Returns the same `{:cacao-b64 :iss :siwe}` as `mint`."
+  [{:keys [seed nonce iat exp op-caps aud domain]}]
+  (when-not (apex-instant-ok? iat)
+    (throw (ex-info "cacao: apex :iat must be YYYY-MM-DDTHH:MM:SSZ — the apex's
+                     parse-utc-seconds accepts nothing else, and a value it
+                     cannot parse becomes an opaque 401"
+                    {:cacao/rule :apex-iat-format :iat iat})))
+  (when (and exp (not (apex-instant-ok? exp)))
+    (throw (ex-info "cacao: apex :exp must be YYYY-MM-DDTHH:MM:SSZ"
+                    {:cacao/rule :apex-exp-format :exp exp})))
+  (when (str/blank? (str nonce))
+    (throw (ex-info "cacao: apex requires a FRESH nonce per request — the edge
+                     records nonces for replay protection, so reusing one 401s"
+                    {:cacao/rule :apex-nonce-required})))
+  (let [iss (ed/did-key-from-seed seed)]
+    (mint {:seed seed
+           :aud (or aud kotobase-apex-aud)
+           :domain (or domain kotobase-apex-domain)
+           :iat iat :exp exp :nonce nonce
+           :header-type "caip122"
+           :resources (kotobase-apex-resources iss op-caps)})))
 
 (defn- temporal-ok?
   "true iff `now` (when given) falls within [iat, exp) of `payload`, each
