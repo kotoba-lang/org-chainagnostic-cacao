@@ -140,6 +140,20 @@
          (conj (mapv #(str "kotoba://can/" %) (remove nil? op-caps))
                (str "kotoba://graph/" did)))))
 
+(defn decode-payload
+  "The `p` field of a minted CACAO, WITHOUT verifying it.
+
+  `verify` answers whether a token is good; this answers what it SAYS, which
+  is the question when the token is deliberately bad. Exposed so the
+  conformance suite can assert that each of its rejection cases differs from
+  a valid one in exactly one way — a case with two deviations proves nothing,
+  because the rejection no longer names a rule."
+  [cacao-b64]
+  (let [p (get (cbor/decode (unb64 cacao-b64)) "p")]
+    {:iss (get p "iss") :aud (get p "aud") :iat (get p "iat") :exp (get p "exp")
+     :nonce (get p "nonce") :domain (get p "domain") :version (get p "version")
+     :statement (get p "statement") :resources (vec (get p "resources"))}))
+
 (defn envelope-header
   "The `h` field of a minted CACAO, WITHOUT verifying it.
 
