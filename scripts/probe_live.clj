@@ -7,14 +7,25 @@
         '[java.time.temporal ChronoUnit]
         '[java.security SecureRandom])
 
-(defn- send-one [base cacao-b64 did]
+(defn- json-str
+  "Minimal JSON for a flat map of strings — this script must run from a clean
+  clone with no deps beyond the library, so it can be pointed at a deployment
+  during an incident."
+  [m]
+  (str "{" (clojure.string/join
+            "," (for [[k v] m]
+                  (str "\"" (name k) "\":\""
+                       (clojure.string/escape (str v) {\" "\\\"" \\ "\\\\"})
+                       "\"")))
+       "}"))
+
+(defn- send-one [base cacao-b64 request did]
   (try
-    (let [;; hand-built JSON: this script must run with no deps beyond the
-          ;; library itself, so it can be pointed at a deployment from a clean
-          ;; clone during an incident.
-          body (str "{\"graph\":\"kotobase/db/" did "/conformance-probe\","
-                    "\"query_edn\":\"[nil \\\":probe/nothing\\\" nil]\","
-                    "\"cacao_b64\":\"" cacao-b64 "\"}")
+    (let [default {:graph (str "kotobase/db/" did "/conformance-probe")
+                   :query_edn "[nil \":probe/nothing\" nil]"}
+          ;; a request-shape case replaces parts of the body; a CACAO case
+          ;; leaves it alone.
+          body (json-str (assoc (merge default request) :cacao_b64 cacao-b64))
           req (-> (HttpRequest/newBuilder (URI/create (str base "/xrpc/ai.gftd.apps.kotobase.datomic.q")))
                   (.header "content-type" "application/json")
                   (.header "authorization" (str "CACAO " cacao-b64))
@@ -34,4 +45,4 @@
         now (.truncatedTo (Instant/now) ChronoUnit/SECONDS)
         opts {:seed seed :now-iso (str now) :exp-iso (str (.plusSeconds now 300))}]
     (println (str "target: " base "\nissuer: " did "\n"))
-    (println (conf/report (conf/run #(send-one base % did) opts)))))
+    (println (conf/report (conf/run (fn [c rq] (send-one base c rq did)) (assoc opts :did did))))))

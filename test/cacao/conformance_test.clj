@@ -60,32 +60,32 @@
 (deftest a-measurement-is-never-scored-as-a-failure
   (testing ":unknown cases report what a deployment does; treating them as
             failures would make the report unreadable during a migration"
-    (let [{:keys [summary results]} (conf/run (constantly {:status 401 :body "{}"}) opts)]
+    (let [{:keys [summary results]} (conf/run (fn [_ _] {:status 401 :body "{}"}) opts)]
       (is (= 4 (:measured summary)) "eip4361, xrpc-only, d1-only, sig-base64url")
       (is (every? #(= :measured (:result/agrees? %))
                   (filter #(= :unknown (:case/expect %)) results))))))
 
 (deftest a-deployment-that-accepts-everything-is-reported-as-disagreeing
   (testing "the state the apex was in until 2026-07-27: not verifying at all"
-    (let [{:keys [summary]} (conf/run (constantly {:status 200 :body "{\"ok\":true}"}) opts)]
+    (let [{:keys [summary]} (conf/run (fn [_ _] {:status 200 :body "{\"ok\":true}"}) opts)]
       (is (pos? (:disagree summary))
           "every reject-case should disagree when nothing is enforced"))))
 
 (deftest a-deployment-that-rejects-everything-fails-the-valid-cases
-  (let [{:keys [summary]} (conf/run (constantly {:status 401 :body "{}"}) opts)]
+  (let [{:keys [summary]} (conf/run (fn [_ _] {:status 401 :body "{}"}) opts)]
     (is (pos? (:disagree summary)))))
 
 (deftest an-unreachable-target-is-not-a-rejection
   (testing "a probe that could not connect must not read as 'the rule is
             enforced' -- that is how an outage gets recorded as compliance"
-    (let [{:keys [results]} (conf/run (constantly {:status nil :body ""}) opts)]
+    (let [{:keys [results]} (conf/run (fn [_ _] {:status nil :body ""}) opts)]
       (is (every? #(= :unreachable (:result/outcome %)) results)))))
 
 (deftest the-absence-of-a-reason-is-itself-reported
   (testing "the edge computes a precise message and drops it; measuring that
             gap is what makes it fixable"
-    (let [none (conf/run (constantly {:status 401 :body "{\"ok\":false,\"error\":\"Unauthorized\"}"}) opts)
-          some* (conf/run (constantly {:status 401 :body "{\"error\":\"Unauthorized\",\"reason\":\"cacao/iat-format\"}"}) opts)]
+    (let [none (conf/run (fn [_ _] {:status 401 :body "{\"ok\":false,\"error\":\"Unauthorized\"}"}) opts)
+          some* (conf/run (fn [_ _] {:status 401 :body "{\"error\":\"Unauthorized\",\"reason\":\"cacao/iat-format\"}"}) opts)]
       (is (false? (:reason-visible? (:summary none))))
       (is (true? (:reason-visible? (:summary some*))))
       (is (clojure.string/includes? (conf/report none) "carry NO reason")))))
@@ -121,6 +121,50 @@
                 (:case/cacao (by-id :tampered-signature))))
       (is (= :unknown (:case/expect (by-id :signature-base64url))))
       (is (= :reject (:case/expect (by-id :tampered-signature)))))))
+
+(deftest request-shape-cases-only-run-when-a-did-is-given
+  (testing "they need an issuer to build a literal ref; without one the suite
+            still runs its CACAO half rather than erroring"
+    (let [without (conf/run (fn [_ _] {:status 200 :body "{}"}) opts)
+          with (conf/run (fn [_ _] {:status 200 :body "{}"})
+                         (assoc opts :did "did:key:zTest"))]
+      (is (= 13 (count (:results without))))
+      (is (= 19 (count (:results with)))))))
+
+(deftest a-request-case-carries-a-body-and-a-cacao-case-does-not
+  (testing "the runner hands the probe whichever it has, so one probe serves
+            both halves"
+    (let [rq (conf/request-cases (assoc opts :did "did:key:zTest"))]
+      (is (every? :case/request rq))
+      (is (every? :case/cacao rq)
+          "a request-shape case carries a VALID CACAO: the deviation is in the
+           body, so the auth must be beyond question or a rejection says
+           nothing about the shape")
+      (is (every? (complement :case/request) (conf/cases opts))))))
+
+(deftest the-ref-cases-are-a-three-way-distinction
+  (testing "literal / CID+name / CID alone. The middle one is what a client
+            naturally has plus what the bridge needs; the last is what took
+            the marketplace's reads down"
+    (let [by-id (into {} (map (juxt :case/id identity) (conf/request-cases (assoc opts :did "did:key:zTest"))))]
+      (is (= :accept (:case/expect (by-id :ref-literal))))
+      (is (= :accept (:case/expect (by-id :ref-cid-with-db-name))))
+      (is (= :unknown (:case/expect (by-id :ref-cid-only)))
+          "whether a CID alone resolves is the backend's choice; what is not
+           negotiable is that a caller can tell unresolvable from empty")
+      (is (contains? (:case/request (by-id :ref-cid-with-db-name)) :db_name))
+      (is (not (contains? (:case/request (by-id :ref-cid-only)) :db_name))))))
+
+(deftest the-pattern-cases-differ-only-in-the-subject-position
+  (let [by-id (into {} (map (juxt :case/id identity) (conf/request-cases (assoc opts :did "did:key:zTest"))))
+        q #(:query_edn (:case/request (by-id %)))]
+    (is (clojure.string/starts-with? (q :pattern-wildcard-subject) "[nil "))
+    (is (clojure.string/starts-with? (q :pattern-bound-subject) "[\"mp.probe/x\""))
+    (is (= :accept (:case/expect (by-id :pattern-wildcard-subject)))
+        "every bounded read in marketplace.edge rests on this")
+    (is (= :unknown (:case/expect (by-id :pattern-bound-subject)))
+        "reading ONE document by subject is refused today; a regression here
+         is invisible except as read volume")))
 
 (deftest the-vocabulary-table-is-the-one-source
   (testing "the outage was two names for one permission and no table"

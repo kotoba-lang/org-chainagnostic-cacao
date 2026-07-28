@@ -257,6 +257,90 @@
                          (if (= \A (nth cacao-b64 (- (count cacao-b64) 2))) "B" "A")
                          (subs cacao-b64 (dec (count cacao-b64)))))}]))
 
+
+;; ── request shape ────────────────────────────────────────────────────────────
+;;
+;; Not every contract term is about the CACAO. Two of the five failures that
+;; took the marketplace down were about the BODY: a read that named the graph
+;; only by content-addressed CID (404 UnknownGraphCid, which the client then
+;; turned into an empty result), and a query pattern with a bound subject
+;; (400 InvalidDatomicRequest). Same structure as the CACAO terms — changed
+;; silently, answered opaquely, absorbed by a caller into something that
+;; looked normal — so they belong in the same suite.
+
+(defn request-cases
+  "Cases that vary the REQUEST BODY rather than the CACAO.
+
+  Each carries a VALID CACAO of its own: the deviation is in the body, so
+  the auth must be beyond question or a rejection says nothing about the
+  shape. A first version omitted them and every case rejected — the suite
+  reported DISAGREE on three terms I had measured working by hand an hour
+  earlier, which is the mechanism doing its job on its author for the second
+  time today.
+
+  `:case/request` is merged into whatever body the probe would otherwise
+  send."
+  [{:keys [seed now-iso exp-iso did]}]
+  (let [cid-graph "bafyreicuqbxou4isy5z4d5lucus326qtuwpslhpslkb4pazp7deaatsedq"
+        literal (str "kotobase/db/" did "/conformance-probe")
+        wildcard "[nil \":mp.probe/doc\" nil]"
+        ok (fn [nonce] (:cacao-b64 (cacao/mint-kotobase-apex
+                                    {:seed seed :nonce nonce :iat now-iso :exp exp-iso
+                                     :op-caps (read-capabilities)})))]
+    [{:case/id :ref-literal
+      :case/cacao (ok "rq-ref-literal")
+      :case/expect :accept
+      :case/why "the form kotobase-storage-d1 addresses refs by. A client that
+                 can name this needs nothing else"
+      :case/request {:graph literal :query_edn wildcard}}
+
+     {:case/id :ref-cid-with-db-name
+      :case/cacao (ok "rq-ref-cid-with-db-name")
+      :case/expect :accept
+      :case/why "the form this client naturally has (a content-addressed graph)
+                 PLUS the name the bridge needs to resolve it. `transact`
+                 always sent db_name; reads did not, which is why writes
+                 probed clean while every read came back empty"
+      :case/request {:graph cid-graph :db_name "conformance-probe"
+                     :query_edn wildcard}}
+
+     {:case/id :ref-cid-only
+      :case/cacao (ok "rq-ref-cid-only")
+      :case/expect :unknown
+      :case/why "MEASURED, not asserted: whether a CID alone resolves is the
+                 backend's choice. What is not negotiable is that a caller can
+                 tell 'unresolvable' from 'empty' — this answered 404
+                 UnknownGraphCid and kotobase-client turned it into an empty
+                 result, which is indistinguishable from an empty database and
+                 is why data looked lost"
+      :case/request {:graph cid-graph :query_edn wildcard}}
+
+     {:case/id :pattern-wildcard-subject
+      :case/cacao (ok "rq-pattern-wildcard-subject")
+      :case/expect :accept
+      :case/why "scanning one attribute across a kind. Every bounded read in
+                 marketplace.edge rests on this"
+      :case/request {:graph literal :query_edn wildcard}}
+
+     {:case/id :pattern-bound-subject
+      :case/cacao (ok "rq-pattern-bound-subject")
+      :case/expect :unknown
+      :case/why "MEASURED: reading ONE document by its subject. This is what a
+                 read of one document should be, and the bridge answers 400
+                 InvalidDatomicRequest, so `marketplace.edge/load-one` reads a
+                 whole kind and filters. A regression here is invisible except
+                 as read volume, which is the kind of thing nobody notices
+                 until a bill or a timeout"
+      :case/request {:graph literal
+                     :query_edn "[\"mp.probe/x\" \":mp.probe/doc\" nil]"}}
+
+     {:case/id :pattern-bound-subject-only
+      :case/cacao (ok "rq-pattern-bound-subject-only")
+      :case/expect :unknown
+      :case/why "the same question without an attribute, in case the refusal
+                 is about the pair rather than the subject"
+      :case/request {:graph literal :query_edn "[\"mp.probe/x\" nil nil]"}}]))
+
 ;; ── running ──────────────────────────────────────────────────────────────────
 
 (defn- classify
@@ -282,19 +366,24 @@
           ["reason" "detail" "details" "cacao_error" "error_reason"])))
 
 (defn run
-  "Run every case against `probe`.
+  "Run every case — CACAO shape and request shape — against `probe`.
 
-  `probe` is `(fn [cacao-b64] -> {:status int :body string})`. Keeping the
-  transport out of this namespace is what lets the same suite run against
+  `probe` is `(fn [cacao-b64 request-overrides] -> {:status int :body
+  string})`. `request-overrides` is nil for a CACAO case (send your usual
+  body) and a map to merge for a request-shape case. Keeping the transport
+  out of this namespace is what lets the same suite run against
   kotobase.net, a `wrangler dev` worker, or a stub in a unit test.
+
+  `opts` needs `:did` for the request-shape cases to build a literal ref;
+  omit it and only the CACAO cases run.
 
   Returns `{:results [...] :summary {...}}`. A case whose `:case/expect` is
   `:unknown` is never a failure — it is a MEASUREMENT, and the report is
-  where you read which backend is answering."
-  [probe opts]
-  (let [cs (cases opts)
+  where you read what a deployment currently does."
+  [probe {:keys [did] :as opts}]
+  (let [cs (into (cases opts) (when did (request-cases opts)))
         results (mapv (fn [c]
-                        (let [r (probe (:case/cacao c))
+                        (let [r (probe (:case/cacao c) (:case/request c))
                               got (classify r)]
                           (-> c
                               (dissoc :case/cacao)
@@ -317,14 +406,12 @@
                :reason-visible? (boolean (some :result/reason results))}}))
 
 (defn- pad
-  "Left-justify S to WIDTH. Replaces `format`'s %-Ns, which is :clj-only --
-  this namespace is .cljc and clj-kondo rightly rejected `format` as
-  unresolved for the :cljs branch, leaving CI red."
-  [s width]
+  "Right-pad to `n`. `format` is JVM-only and this namespace is .cljc — the
+  report has to render the same on a Node runner as on a JVM one, because
+  the whole point is that anyone can point it at a deployment."
+  [s n]
   (let [s (str s)]
-    (if (<= width (count s))
-      s
-      (str s (apply str (repeat (- width (count s)) " "))))))
+    (if (>= (count s) n) s (str s (apply str (repeat (- n (count s)) " "))))))
 
 (defn report
   "The run, as lines a human reads in a terminal."
