@@ -11,7 +11,7 @@
   from the contract learns about it in production, as an outage, with one bit
   of information.
 
-  On 2026-07-27 that cost a full day across four separate failures with
+  On 2026-07-27/28 that cost two days across FIVE separate failures with
   identical symptoms:
 
     - `kagi push` had been dead for months because `(str (Instant/now))`
@@ -24,7 +24,14 @@
       marketplace read 401'd;
     - refs moved from content-addressed CIDs to literal
       `kotobase/db/<did>/<name>` strings, so existing data became invisible
-      (`UnknownGraphCid`) rather than missing.
+      (`UnknownGraphCid`) rather than missing;
+    - the apex path signed base64url where the verifier decodes base64, so a
+      CORRECT signature failed verification and seven live actors 401'd for a
+      day with every payload field identical to a working token.
+
+  That last one hid because this suite had no case for it. It does now
+  (`:signature-base64url` / `:signature-base64`), which is the only honest
+  response to a contract term discovered by outage.
 
   Not one of those is exotic. Each is a contract this namespace can state and
   a probe can check in seconds.
@@ -197,6 +204,45 @@
                    (cacao/mint-kotobase-apex
                     {:seed seed :nonce "probe-both" :iat now-iso :exp exp-iso
                      :op-caps (read-capabilities)}))}
+
+     {:case/id :signature-base64url
+      :case/expect :unknown
+      :case/why "THE case whose absence let the fifth cause of the day hide.
+                 A correct Ed25519 signature over the correct message, encoded
+                 base64url instead of base64. The verifier decodes one way; the
+                 other decodes to different bytes and fails — on a signature
+                 that is not wrong. kotobase-client's apex path defaulted to
+                 base64url while its direct-v1 path had already been fixed, and
+                 seven live actors 401'd for a day with every payload field
+                 identical to a working token. Measured, not asserted: which
+                 encoding a deployment takes is its choice to state"
+      :case/cacao (:cacao-b64
+                   (cacao/mint {:seed seed :aud cacao/kotobase-apex-aud
+                                :domain cacao/kotobase-apex-domain
+                                :iat now-iso :exp exp-iso :nonce "probe-sigurl"
+                                :header-type "caip122"
+                                :sig-encoding :base64url
+                                ;; the READ capabilities too. Without them this
+                                ;; case differs in two ways and its rejection
+                                ;; proves nothing about the encoding — the
+                                ;; suite caught exactly that on its first live
+                                ;; run, which is the discipline working on its
+                                ;; author.
+                                :resources (cacao/kotobase-apex-resources
+                                            did (read-capabilities))}))}
+
+     {:case/id :signature-base64
+      :case/expect :accept
+      :case/why "the mirror image. Together with the previous case this states
+                 the encoding a deployment takes, which nothing in a 401 does"
+      :case/cacao (:cacao-b64
+                   (cacao/mint {:seed seed :aud cacao/kotobase-apex-aud
+                                :domain cacao/kotobase-apex-domain
+                                :iat now-iso :exp exp-iso :nonce "probe-sigb64"
+                                :header-type "caip122"
+                                :sig-encoding :base64
+                                :resources (cacao/kotobase-apex-resources
+                                            did (read-capabilities))}))}
 
      {:case/id :tampered-signature
       :case/expect :reject

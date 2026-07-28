@@ -39,6 +39,8 @@
 (defn- b64 ^String [b]
   #?(:clj (.encodeToString (Base64/getEncoder) ^bytes b)
      :cljs (.toString (js/Buffer.from b) "base64")))
+(defn- b64url ^String [b]
+  (-> (b64 b) (str/replace "+" "-") (str/replace "/" "_") (str/replace "=" "")))
 (defn- unb64 [^String s]
   #?(:clj (.decode (Base64/getDecoder) s)
      :cljs (js/Uint8Array. (js/Buffer.from s "base64"))))
@@ -70,9 +72,22 @@
    Required opts: :seed :aud :iat :exp :nonce :resources. Optional: :domain
    (default kotoba.etzhayyim.com) :version (default \"1\") :statement
    :header-type (default \"eip4361\"; the kotobase apex wants \"caip122\" —
-   see `mint-kotobase-apex`, which is what callers targeting it should use)."
-  [{:keys [seed aud iat exp nonce resources statement domain version header-type]
-    :or {domain "kotoba.etzhayyim.com" version "1"}}]
+   see `mint-kotobase-apex`, which is what callers targeting it should use)
+   :sig-encoding (`:base64` default, or `:base64url`).
+
+   THE SIGNATURE ENCODING IS PART OF THE CONTRACT AND IS NOT SELF-DESCRIBING.
+   A verifier decodes those bytes one way; hand it the other and Ed25519
+   verification fails on a signature that is otherwise perfectly correct. The
+   kotobase apex takes plain base64, and a base64url signature there comes
+   back as the same bare 401 as a wrong key or an expired token — which is
+   how seven live actors were down for a day
+   (kotobase-client's apex path defaulted to base64url while its direct-v1
+   path had already been fixed). `:base64url` exists here so the conformance
+   suite can PROVE which one a deployment takes, not because a caller should
+   choose."
+  [{:keys [seed aud iat exp nonce resources statement domain version header-type
+           sig-encoding]
+    :or {domain "kotoba.etzhayyim.com" version "1" sig-encoding :base64}}]
   (when (nil? nonce)
     (throw (ex-info "cacao/mint: :nonce is required — verify/verify-chain's
                      nonce-replay protection has no effect on a CACAO minted
@@ -83,7 +98,8 @@
         msg (siwe-message {:iss iss :aud aud :iat iat :exp exp :nonce nonce
                            :domain domain :version version :statement statement
                            :resources resources})
-        sig-b64 (b64 (ed/sign seed (utf8-bytes msg)))
+        sig-bytes (ed/sign seed (utf8-bytes msg))
+        sig-b64 (if (= :base64url sig-encoding) (b64url sig-bytes) (b64 sig-bytes))
         cacao (cbor/encode
                (cbor/ordered
                 [["h" (cbor/ordered [["t" (or header-type "eip4361")]])]

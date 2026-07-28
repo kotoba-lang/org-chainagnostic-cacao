@@ -13,7 +13,7 @@
 
 (deftest every-case-mints-something-sendable
   (let [cs (conf/cases opts)]
-    (is (= 11 (count cs)))
+    (is (= 13 (count cs)))
     (is (every? #(string? (:case/cacao %)) cs))
     (is (= (count cs) (count (distinct (map :case/id cs)))))))
 
@@ -61,7 +61,7 @@
   (testing ":unknown cases report what a deployment does; treating them as
             failures would make the report unreadable during a migration"
     (let [{:keys [summary results]} (conf/run (constantly {:status 401 :body "{}"}) opts)]
-      (is (= 3 (:measured summary)) "eip4361, xrpc-only, d1-only")
+      (is (= 4 (:measured summary)) "eip4361, xrpc-only, d1-only, sig-base64url")
       (is (every? #(= :measured (:result/agrees? %))
                   (filter #(= :unknown (:case/expect %)) results))))))
 
@@ -89,6 +89,38 @@
       (is (false? (:reason-visible? (:summary none))))
       (is (true? (:reason-visible? (:summary some*))))
       (is (clojure.string/includes? (conf/report none) "carry NO reason")))))
+
+(deftest the-signature-encoding-cases-are-mirror-images
+  (testing "a correct signature over the correct message, differing only in
+            how its bytes are spelled. The absence of this pair is why the
+            fifth cause of the outage hid: every payload field matched a
+            working token."
+    (let [by-id (into {} (map (juxt :case/id identity) (conf/cases opts)))
+          p-url (cacao/decode-payload (:case/cacao (by-id :signature-base64url)))
+          p-b64 (cacao/decode-payload (:case/cacao (by-id :signature-base64)))]
+      (is (= (dissoc p-url :nonce) (dissoc p-b64 :nonce))
+          "identical payloads apart from the nonce -- the ONLY difference is
+           the signature encoding")
+      (testing "both carry the READ capabilities, so a rejection is about the
+                encoding and nothing else -- the live run caught this missing
+                and DISAGREED, which is the suite working on its own author"
+        (doseq [id [:signature-base64 :signature-base64url]]
+          (let [rs (set (:resources (cacao/decode-payload (:case/cacao (by-id id)))))]
+            (is (contains? rs "kotoba://can/graph:query"))
+            (is (contains? rs "kotoba://can/datom:read")))))
+      (is (true? (:valid? (cacao/verify (:case/cacao (by-id :signature-base64))))))
+      (is (false? (:valid? (cacao/verify (:case/cacao (by-id :signature-base64url)))))
+          "this library decodes base64; a base64url signature does not verify
+           against it, which is exactly what the apex experienced"))))
+
+(deftest a-base64url-signature-is-not-a-tampered-one
+  (testing "they fail the same way and mean completely different things: one
+            is an attack, the other is a caller spelling bytes differently"
+    (let [by-id (into {} (map (juxt :case/id identity) (conf/cases opts)))]
+      (is (not= (:case/cacao (by-id :signature-base64url))
+                (:case/cacao (by-id :tampered-signature))))
+      (is (= :unknown (:case/expect (by-id :signature-base64url))))
+      (is (= :reject (:case/expect (by-id :tampered-signature)))))))
 
 (deftest the-vocabulary-table-is-the-one-source
   (testing "the outage was two names for one permission and no table"
