@@ -443,3 +443,30 @@
                                            :exp "2026-07-27T10:20:30Z"
                                            :resources ["kotoba://can/x"]})]
       (is (= "eip4361" (get (cacao/envelope-header cacao-b64) "t"))))))
+
+(deftest a-cacao-minted-with-a-statement-verifies
+  ;; It did not, from the day the option existed: `siwe-message` puts the
+  ;; statement in the signed text and the payload dropped it, so `verify`
+  ;; reconstructed a different string and rejected what `mint` had just made.
+  (let [seed (byte-array 32)
+        _ (.nextBytes (java.security.SecureRandom.) seed)
+        base {:seed seed :aud "did:key:zBob" :iat "2026-01-01T00:00:00Z"
+              :exp "2027-01-01T00:00:00Z" :nonce "n1"
+              :resources ["drive:d#write"]}
+        with-statement (cacao/mint (assoc base :statement "grants write on d"))]
+    (is (:valid? (cacao/verify (:cacao-b64 with-statement) {})))
+    (is (= "grants write on d"
+           (:statement (:payload (cacao/verify (:cacao-b64 with-statement) {})))))
+    (is (:valid? (cacao/verify (:cacao-b64 with-statement)
+                               {:now "2026-06-01T00:00:00Z"})))))
+
+(deftest a-statement-less-cacao-is-byte-for-byte-what-it-was
+  ;; The field is appended rather than placed in SIWE order so that every
+  ;; token already issued still verifies.
+  (let [seed (byte-array 32)
+        _ (.nextBytes (java.security.SecureRandom.) seed)
+        m (cacao/mint {:seed seed :aud "did:key:zBob" :iat "2026-01-01T00:00:00Z"
+                       :exp "2027-01-01T00:00:00Z" :nonce "n1"
+                       :resources ["drive:d#write"]})]
+    (is (:valid? (cacao/verify (:cacao-b64 m) {})))
+    (is (nil? (:statement (:payload (cacao/verify (:cacao-b64 m) {})))))))
