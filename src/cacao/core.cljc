@@ -103,9 +103,23 @@
         cacao (cbor/encode
                (cbor/ordered
                 [["h" (cbor/ordered [["t" (or header-type "eip4361")]])]
-                 ["p" (cbor/ordered [["iss" iss] ["aud" aud] ["iat" iat] ["exp" exp]
-                                     ["nonce" nonce] ["domain" domain] ["version" version]
-                                     ["resources" (vec resources)]])]
+                 ;; `statement` is carried only when there is one, and it has
+                 ;; to be carried: `siwe-message` puts it in the signed text,
+                 ;; and a payload that dropped it left `verify` reconstructing
+                 ;; a different string and rejecting a CACAO this very
+                 ;; function had just minted. Measured — every CACAO minted
+                 ;; with :statement was unverifiable, silently, from the day
+                 ;; the option existed.
+                 ;;
+                 ;; Appended after `resources` rather than placed in SIWE
+                 ;; order, so the CBOR of a statement-less CACAO is byte-for-
+                 ;; byte what it was and every token already issued still
+                 ;; verifies.
+                 ["p" (cbor/ordered
+                       (cond-> [["iss" iss] ["aud" aud] ["iat" iat] ["exp" exp]
+                                ["nonce" nonce] ["domain" domain] ["version" version]
+                                ["resources" (vec resources)]]
+                         statement (conj ["statement" statement])))]
                  ["s" (cbor/ordered [["t" "EdDSA"] ["s" sig-b64]])]]))]
     {:cacao-b64 (b64 cacao) :iss iss :siwe msg}))
 
@@ -331,9 +345,16 @@
            p (get m "p") s (get m "s")
            iss (get p "iss")
            sig (unb64 (get s "s"))
-           payload {:iss iss :aud (get p "aud") :iat (get p "iat") :exp (get p "exp")
-                    :nonce (get p "nonce") :domain (get p "domain")
-                    :version (get p "version") :resources (get p "resources")}
+           ;; `statement` only when the payload carries one. `siwe-message`
+           ;; emits the statement line only when the key is present, so a
+           ;; payload map that always had the key — even as nil — would
+           ;; reconstruct correctly, while one that never had it could not
+           ;; reconstruct a signed statement at all.
+           payload (cond-> {:iss iss :aud (get p "aud") :iat (get p "iat")
+                            :exp (get p "exp") :nonce (get p "nonce")
+                            :domain (get p "domain") :version (get p "version")
+                            :resources (get p "resources")}
+                     (get p "statement") (assoc :statement (get p "statement")))
            sig-valid? (ed/verify-did iss (utf8-bytes (siwe-message payload)) sig)
            temporal-valid? (temporal-ok? payload now)]
        (if (and sig-valid? temporal-valid?)
