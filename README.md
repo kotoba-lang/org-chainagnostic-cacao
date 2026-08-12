@@ -116,11 +116,19 @@ babashka-friendly.
 
 ## `kotoba` CLI — DID / CACAO / seed
 
-A tiny babashka CLI (`bin/kotoba`, or `bb kotoba …`) over the identity stack.
-Pure argument handling lives in `src/cacao/cli.cljc` (portable `.cljc`); all
-crypto + IO (SecureRandom, base64, `java.time` instants, and the `ed25519` /
-`cacao` requires) sits behind `#?(:clj …)`. Runs on bb — JCA Ed25519 sign/verify
-work there, and `ed25519.core` derives the public key in pure Clojure.
+A tiny CLI (`bin/kotoba`, or `clojure -M -m cacao.cli …`) over the identity
+stack. Pure argument handling lives in `src/cacao/cli.cljc` (portable `.cljc`);
+all crypto + IO (SecureRandom, base64, `java.time` instants, and the `ed25519` /
+`cacao` requires) sits behind `#?(:clj …)`. JCA supplies Ed25519 sign/verify and
+`ed25519.core` derives the public key in pure Clojure, so there is no native
+crypto dependency.
+
+> `bb kotoba …` is **unavailable**. babashka was retired as this workspace's
+> script host (ADR-2607173000), and that conversion also deleted the `bb.edn`
+> which supplied this CLI's deps and source paths; `scripts/tasks.edn` was left
+> a literal empty registry (ADR-2608131600). `bin/kotoba` itself exec'd
+> `bb -m cacao.cli` until 2026-08-13 and now execs `clojure -M -m cacao.cli`;
+> a seed → `did:key:z6Mk…` round trip through it was verified that day.
 
 ```bash
 # 1. Mint a fresh Ed25519 seed. THIS IS SECRET — the stderr warning tells you so;
@@ -172,7 +180,9 @@ must be documented by whoever mints, not detected by whoever verifies.
 
 ## Correctness
 
-`bb test` / `clojure -M:test`: mint→verify round-trip + issuer binding, tamper
+`clojure -M:test` (61 tests / 229 assertions, verified 2026-08-13; the `bb test`
+that used to be listed alongside it is unavailable, see above): mint→verify
+round-trip + issuer binding, tamper
 rejection, SIWE plaintext shape, header shape, `:now` freshness, nonce-replay
 protection (fresh nonce succeeds + is recorded, exact replay rejected,
 distinct nonces both succeed, cross-issuer nonce-string reuse is not a false
