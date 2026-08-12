@@ -11,6 +11,15 @@
 (defn- sh [argv]
   (let [r (.spawnSync cp (first argv) (to-array (rest argv))
                       #js {:encoding "utf8" :stdio "inherit" :shell false})]
+    ;; A child that never started, and one killed by a signal, BOTH report
+    ;; status:null and land on the synthetic exit 1 -- with nothing printed,
+    ;; because stdio is inherited and there was no child to write anything.
+    ;; Say which it was: an exit 1 with no output is indistinguishable from a
+    ;; command that ran and failed quietly.
+    (when-let [e (.-error r)]
+      (js/console.error "run-task: could not start" (pr-str argv) "--" (.-message e)))
+    (when-let [sig (.-signal r)]
+      (js/console.error "run-task:" (pr-str (first argv)) "killed by signal" sig))
     (or (.-status r) 1)))
 
 (def tasks-path (.join path (.dirname path *file*) "tasks.edn"))
@@ -24,8 +33,10 @@
 (defn- run-one [task rest-args]
   (let [t (resolve-task task)]
     (when-not t
-      (binding [*out* *err*] (println "unknown task:" task)
-        (println "known:" (str/join ", " (map name (sort (keys tasks))))))
+      ;; js/console.error, NOT (binding [*out* *err*] (println …)) -- nbb does
+      ;; not honour that binding and the text lands on stdout (ADR-2608130600).
+      (js/console.error "unknown task:" task)
+      (js/console.error "known:" (str/join ", " (map name (sort (keys tasks)))))
       (.exit js/process 2))
     (cond
       (:runs t)
@@ -38,7 +49,7 @@
                    (vec (:cmd t)))]
         (sh argv))
       :else
-      (do (binding [*out* *err*] (println "bad task entry" task t))
+      (do (js/console.error "bad task entry" task t)
           (.exit js/process 2)))))
 
 (let [args (vec *command-line-args*)
@@ -47,8 +58,7 @@
       task (first args)
       rest-args (vec (rest args))]
   (when-not task
-    (binding [*out* *err*]
-      (println "usage: nbb scripts/run-task.cljs <task> [args…]")
-      (println "tasks:" (str/join ", " (map name (sort (keys tasks))))))
+    (js/console.error "usage: nbb scripts/run-task.cljs <task> [args…]")
+    (js/console.error "tasks:" (str/join ", " (map name (sort (keys tasks)))))
     (.exit js/process 2))
   (.exit js/process (or (run-one task rest-args) 0)))
