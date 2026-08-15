@@ -190,6 +190,43 @@
   (is (false? (cacao/covers? nil ledger-main)))
   (is (false? (cacao/covers? ledger-main 42))))
 
+(deftest covers?-does-not-confuse-a-prefix
+  ;; The case covers?-wildcard-rule above does not reach. It tests `*` in a
+  ;; MIDDLE position ("kotoba://cap/*x"); the hazard is a trailing `*` that is
+  ;; not preceded by `/`. Until authority.scope replaced the substring test,
+  ;; this assertion was false: covers? stripped the `*` and asked
+  ;; starts-with?, so "alice" is a prefix of "alice-evil".
+  (is (false? (cacao/covers? "kotoba://graph/alice*" "kotoba://graph/alice-evil"))
+      "a wildcard may not reach across a segment boundary")
+  (is (false? (cacao/covers? "kotoba://graph/alice" "kotoba://graph/alice-evil"))
+      "and neither may an exact grant")
+  ;; the direction that must keep working, so this is not a pair of assertions
+  ;; that passes by refusing everything
+  (is (true? (cacao/covers? "kotoba://graph/*" "kotoba://graph/alice-evil")))
+  (is (true? (cacao/covers? "kotoba://graph/alice" "kotoba://graph/alice"))))
+
+(deftest a-chain-cannot-escalate-through-a-prefix
+  ;; The end-to-end consequence, in the shape that actually triggered the bug:
+  ;; the PARENT carries a trailing `*` that is not preceded by `/`. Under the
+  ;; old substring test this chain verified -- "alice-evil" starts with
+  ;; "kotoba://graph/alice" -- so a delegate could re-issue itself a
+  ;; neighbouring graph and the escalation check said nothing.
+  ;;
+  ;; (A parent without the `*`, e.g. "kotoba://graph/alice", was caught by the
+  ;; old code too: it fell to the exact-match branch. Testing that shape looks
+  ;; like a regression test and discriminates nothing.)
+  (let [root (mint-link seed-a did-b ["kotoba://graph/alice*"])
+        leaf (mint-link seed-b did-c ["kotoba://graph/alice-evil"])
+        r (cacao/verify-chain [root leaf])]
+    (is (false? (:chain/valid? r)))
+    (is (= [:chain/resource-escalation] (mapv :problem (:chain/problems r)))))
+  ;; and a genuine narrowing under the same shape still verifies
+  (let [root (mint-link seed-a did-b ["kotoba://graph/*"])
+        leaf (mint-link seed-b did-c ["kotoba://graph/alice-evil"])
+        r (cacao/verify-chain [root leaf])]
+    (is (true? (:chain/valid? r)))
+    (is (= #{"kotoba://graph/alice-evil"} (:chain/resources r)))))
+
 (deftest two-link-chain-verifies
   (let [root (mint-link seed-a did-b [wildcard ledger-aux])
         leaf (mint-link seed-b did-c [ledger-main])
