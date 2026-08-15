@@ -33,7 +33,8 @@
 (ns cacao.core
   (:require [clojure.string :as str]
             [ed25519.core :as ed]
-            [cbor.core :as cbor])
+            [cbor.core :as cbor]
+            [authority.scope :as scope])
   #?(:clj (:import (java.util Base64))))
 
 (defn- b64 ^String [b]
@@ -372,14 +373,32 @@
 
 (defn covers?
   "True when PARENT resource string covers CHILD. A parent ending in `*` is a
-   trailing wildcard and covers every child sharing the prefix before the `*`
-   (e.g. \"kotoba://cap/graph-read/*\" covers \"kotoba://cap/graph-read/g1\");
-   otherwise the match must be exact."
+   trailing wildcard and covers every child sharing the SEGMENT prefix before
+   the `*` (e.g. \"kotoba://cap/graph-read/*\" covers
+   \"kotoba://cap/graph-read/g1\"); otherwise the match must be exact.
+
+   The covering relation is `authority.scope`, not a substring test. This
+   used to strip the `*` and call `starts-with?`, which made
+
+       (covers? \"kotoba://graph/alice*\" \"kotoba://graph/alice-evil\")
+
+   true. No minter in the fleet emits a wildcard that is not preceded by `/`,
+   so the hazard was latent — but it was latent in this function, which meant
+   every future minter had to hold an invariant by hand that nothing checked.
+   Comparing segments removes the substring, so the confusion is not rejected;
+   it is unrepresentable.
+
+   A resource that is not a `scheme://segment[/segment…]` URI is matched
+   exactly. That is a narrowing for a hypothetical non-URI wildcard, and
+   deliberately so: an unstructured string is exactly where a prefix test is
+   least defensible. Nothing in the fleet mints one (measured 2026-08-15)."
   [parent child]
   (and (string? parent) (string? child)
-       (if (str/ends-with? parent "*")
-         (str/starts-with? child (subs parent 0 (dec (count parent))))
-         (= parent child))))
+       (let [p (scope/parse parent)
+             c (scope/parse child)]
+         (if (and p c)
+           (scope/covers? p c)
+           (= parent child)))))
 
 (defn- signature-problems [links]
   (keep-indexed (fn [i l]

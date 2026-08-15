@@ -4,7 +4,14 @@
  ;; monorepo siblings present (ADR-2607022400). SHAs are each sibling repo's
  ;; origin/main HEAD as of 2026-07-02, obtained via
  ;;   gh api repos/kotoba-lang/<repo>/commits/main --jq .sha
- :deps {io.github.kotoba-lang/org-ietf-ed25519
+ :deps {;; The covering relation `covers?`/`verify-chain` attenuate against.
+        ;; Not part of CAIP-122 -- resource covering is this fleet's extension,
+        ;; and it is one partial order shared with every other consumer rather
+        ;; than a substring test repeated per scheme.
+        io.github.kotoba-lang/authority
+        {:git/url "https://github.com/kotoba-lang/authority.git"
+         :git/sha "2de205a778f4744a42c609abcc70c989449c2852"}
+        io.github.kotoba-lang/org-ietf-ed25519
         {:git/url "https://github.com/kotoba-lang/org-ietf-ed25519.git"
          :git/sha "e96c4d0390b3f7d7c29f981e17ab666e16dc0fe0"}
         io.github.kotoba-lang/org-ietf-cbor
@@ -15,7 +22,8 @@
            ;; Compose with other aliases, e.g. `clojure -M:local:test`.
            ;; Preserves the pre-existing sibling-checkout workflow without
            ;; breaking clean git-dep consumption above.
-           :local {:override-deps {io.github.kotoba-lang/org-ietf-ed25519  {:local/root "../org-ietf-ed25519"}
+           :local {:override-deps {io.github.kotoba-lang/authority {:local/root "../authority"}
+                                   io.github.kotoba-lang/org-ietf-ed25519  {:local/root "../org-ietf-ed25519"}
                                    io.github.kotoba-lang/org-ietf-cbor {:local/root "../org-ietf-cbor"}}}
            :test {:extra-paths ["test"]
                   :extra-deps {io.github.cognitect-labs/test-runner {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
