@@ -1,5 +1,6 @@
 (ns cacao.cli-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [cacao.cli :as cli]
             [ed25519.core :as ed]
             [cacao.core :as cacao])
@@ -69,3 +70,44 @@
         {:keys [exp]} (cli/mint-cacao {:seed seed-b64 :aud "did:key:zAUD"
                                        :resource "kotoba://x"} now)]
     (is (= "2026-07-03T00:00:00Z" exp) "default ttl is 24h")))
+
+;; ── boolean flags + apex minting ──────────────────────────────────────────────
+
+(deftest boolean-flags-do-not-eat-the-next-flag
+  (testing "a flag with no value is true, not the flag that follows it"
+    (is (= {:apex true} (cli/parse-opts ["--apex"])))
+    (is (= {:apex true :op-cap "datom:read"}
+           (cli/parse-opts ["--apex" "--op-cap" "datom:read"]))
+        "before this, :apex bound \"--op-cap\" and the capability was dropped")
+    (is (= {:apex true :seed "s"} (cli/parse-opts ["--apex" "--seed" "s"]))))
+  (testing "ordinary values are still consumed"
+    (is (= {:seed "abc" :ttl-h "3"} (cli/parse-opts ["--seed" "abc" "--ttl-h" "3"])))))
+
+(deftest apex-validation-rejects-options-it-would-override
+  (is (= [] (cli/validate :cacao {:seed "s" :apex true})))
+  (testing "passing an aud or resource under --apex is a mistake, not a silent override"
+    (is (seq (cli/validate :cacao {:seed "s" :apex true :aud "did:web:elsewhere"})))
+    (is (seq (cli/validate :cacao {:seed "s" :apex true :resource "kotoba://x"}))))
+  (testing "--op-cap without --apex has nowhere to go"
+    (is (seq (cli/validate :cacao {:seed "s" :aud "a" :resource "r" :op-cap "datom:read"}))))
+  (is (seq (cli/validate :cacao {:apex true})) "still needs a seed"))
+
+(deftest apex-mint-carries-the-domain-and-header-the-apex-requires
+  (let [{:keys [cacao-b64 aud]} (cli/mint-cacao {:seed seed-b64 :apex true
+                                                 :op-cap "datom:read"})
+        payload (:payload (cacao/verify cacao-b64))]
+    (testing "the apex accepts exactly one domain and audience; the plain path
+              defaults to neither, which is why its tokens 401 with no reason"
+      (is (= cacao/kotobase-apex-domain (:domain payload)))
+      (is (= cacao/kotobase-apex-aud aud))
+      (is (= cacao/kotobase-apex-aud (:aud payload))))
+    (testing "the reported aud is the minted one, not the absent --aud flag"
+      (is (some? aud)))
+    (testing "the granted capability survives the flag parser"
+      (is (some #(str/includes? % "datom:read") (:resources payload))
+          (pr-str (:resources payload))))))
+
+(deftest plain-mint-still-uses-the-caller-supplied-audience
+  (let [{:keys [aud]} (cli/mint-cacao {:seed seed-b64 :aud "did:key:zAUD"
+                                       :resource "kotoba://x"})]
+    (is (= "did:key:zAUD" aud))))

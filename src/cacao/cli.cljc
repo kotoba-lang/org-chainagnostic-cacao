@@ -39,33 +39,50 @@
        "  kotoba did   --seed <b64>\n"
        "  kotoba cacao --seed <b64> --aud <did> --resource <uri> [--resource <uri> …]\n"
        "               [--ttl-h <hours>] [--nonce <str>]\n"
+       "  kotoba cacao --seed <b64> --apex [--op-cap <cap> …] [--ttl-h <hours>] [--nonce <str>]\n"
        "\n"
        "COMMANDS\n"
        "  seed   Generate a new 32-byte Ed25519 seed, base64. THIS IS SECRET — keep it safe.\n"
        "  did    Derive the public did:key:z6Mk… from a seed. Safe to publish.\n"
        "  cacao  Mint a signed, expiring CACAO capability (iss is derived from the seed).\n"
+       "         With --apex, mint one the kotobase.net apex accepts (see --apex below).\n"
        "\n"
        "OPTIONS\n"
        "  --seed <b64>    raw 32-byte Ed25519 seed, base64-encoded (SECRET)\n"
        "  --aud <did>     audience DID the CACAO is minted for\n"
        "  --resource <u>  a kotoba:// resource URI to grant; repeatable\n"
        "  --ttl-h <n>     lifetime in hours from now (default 24)\n"
-       "  --nonce <s>     explicit nonce (default: random)\n"))
+       "  --nonce <s>     explicit nonce (default: random)\n"
+       "  --apex          mint for the kotobase.net apex: supplies the domain,\n"
+       "                  audience, caip122 header and resource set it requires.\n"
+       "                  Without this, the default domain is kotoba.etzhayyim.com\n"
+       "                  and the apex answers a bare 401 that names no reason.\n"
+       "  --op-cap <c>    (--apex only) an operation capability to grant, e.g.\n"
+       "                  datom:read; repeatable\n"))
 
 (defn parse-opts
   "Parse a flat `--flag value` argv (a seq of strings) into a keyword→value map.
    A flag repeated more than once accumulates into a vector (in argv order).
-   Purely functional — no IO, no host interop."
+   Purely functional — no IO, no host interop.
+
+   A flag with no value — last in argv, or immediately followed by another
+   `--flag` — is a BOOLEAN and parses to `true`. Without this, `--apex
+   --op-cap datom:read` bound :apex to the string \"--op-cap\" and silently
+   dropped the capability: the flag ate the flag after it. No option value in
+   this CLI (seeds, DIDs, URIs, hours) begins with `--`, so treating that
+   prefix as \"not my value\" is unambiguous."
   [args]
   (loop [m {} args (seq args)]
     (if-let [a (first args)]
       (if (str/starts-with? a "--")
         (let [k (keyword (subs a 2))
-              v (second args)
+              nxt (second args)
+              boolean? (or (nil? nxt) (str/starts-with? nxt "--"))
+              v (if boolean? true nxt)
               m (if (contains? m k)
                   (update m k (fn [old] (conj (if (vector? old) old [old]) v)))
                   (assoc m k v))]
-          (recur m (nnext args)))
+          (recur m (if boolean? (next args) (nnext args))))
         (recur m (next args)))
       m)))
 
@@ -81,10 +98,18 @@
   (case command
     :seed  []
     :did   (if (:seed opts) [] ["--seed <b64> is required"])
-    :cacao (cond-> []
-             (not (:seed opts)) (conj "--seed <b64> is required")
-             (not (:aud opts))  (conj "--aud <did> is required")
-             (empty? (as-vec (:resource opts))) (conj "at least one --resource <uri> is required"))
+    ;; --apex supplies aud/domain/header/resources itself, so demanding them
+    ;; would only invite a caller to pass values the apex then rejects.
+    :cacao (if (contains? opts :apex)
+             (cond-> []
+               (not (:seed opts)) (conj "--seed <b64> is required")
+               (:aud opts)      (conj "--aud is set by --apex; drop it")
+               (:resource opts) (conj "--resource is set by --apex; use --op-cap instead"))
+             (cond-> []
+               (not (:seed opts)) (conj "--seed <b64> is required")
+               (not (:aud opts))  (conj "--aud <did> is required")
+               (:op-cap opts)     (conj "--op-cap requires --apex")
+               (empty? (as-vec (:resource opts))) (conj "at least one --resource <uri> is required")))
     [(str "unknown command: " (name (or command :?)))]))
 
 ;; ── JVM-only crypto + IO (behind #?(:clj …)) ──────────────────────────────────
@@ -116,19 +141,37 @@
 
      (defn mint-cacao
        "Mint a CACAO from parsed opts. Returns cacao.core/mint's map plus the
-        computed :iat/:exp. `now` is injectable for testing."
+        computed :iat/:exp. `now` is injectable for testing.
+
+        With `:apex`, delegates to cacao.core/mint-kotobase-apex, which supplies
+        the domain, audience, caip122 header and resource set the kotobase.net
+        apex requires. Minting without it produced a CACAO carrying the default
+        domain kotoba.etzhayyim.com, which the apex refuses with a bare 401 that
+        names no reason — so this CLI could only ever emit tokens that apex
+        rejects, and the rejection could not say why."
        ([opts] (mint-cacao opts (now-instant)))
-       ([{:keys [seed aud resource ttl-h nonce]} ^Instant now]
-        (let [ttl  (long (if ttl-h (Long/parseLong (str ttl-h)) 24))
-              iat  (str now)
-              exp  (str (.plus now ttl ChronoUnit/HOURS))
-              res  (as-vec resource)
-              minted (cacao/mint {:seed (b64-decode seed)
+       ([{:keys [seed aud resource ttl-h nonce apex op-cap]} ^Instant now]
+        (let [ttl   (long (if ttl-h (Long/parseLong (str ttl-h)) 24))
+              iat   (str now)
+              exp   (str (.plus now ttl ChronoUnit/HOURS))
+              seed* (b64-decode seed)
+              nonce (or nonce (random-nonce))]
+          (if apex
+            (let [caps (as-vec op-cap)]
+              (assoc (cacao/mint-kotobase-apex
+                      {:seed seed* :iat iat :exp exp :nonce nonce
+                       :op-caps (seq caps)})
+                     :iat iat :exp exp
+                     :aud cacao/kotobase-apex-aud
+                     :resources (cacao/kotobase-apex-resources
+                                 (ed/did-key-from-seed seed*) (seq caps))))
+            (let [res (as-vec resource)]
+              (assoc (cacao/mint {:seed seed*
                                   :aud aud
                                   :iat iat :exp exp
-                                  :nonce (or nonce (random-nonce))
-                                  :resources res})]
-          (assoc minted :iat iat :exp exp :resources res))))
+                                  :nonce nonce
+                                  :resources res})
+                     :iat iat :exp exp :aud aud :resources res))))))
 
      (defn ^:private eprintln [& xs] (binding [*out* *err*] (apply println xs)))
 
@@ -152,9 +195,12 @@
                           (println (b64-encode s))
                           0)
                  :did   (do (println (seed->did (:seed opts))) 0)
-                 :cacao (let [{:keys [cacao-b64 iss exp resources]} (mint-cacao opts)]
+                 ;; `aud` comes back from mint-cacao rather than from opts: under
+                 ;; --apex the caller never typed one, and echoing the flag would
+                 ;; print nil for the field that decides whether the token works.
+                 :cacao (let [{:keys [cacao-b64 iss exp aud resources]} (mint-cacao opts)]
                           (eprintln (str "# minted CACAO — iss " iss))
-                          (eprintln (str "#   aud=" (:aud opts) " exp=" exp
+                          (eprintln (str "#   aud=" aud " exp=" exp
                                          " resources=" (pr-str resources)))
                           (println cacao-b64)
                           0)))))))
