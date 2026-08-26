@@ -1,9 +1,73 @@
-# cacao-clj
+# Chain-agnostic CACAO and SIWE
 
 [![CI](https://github.com/kotoba-lang/cacao/actions/workflows/ci.yml/badge.svg)](https://github.com/kotoba-lang/cacao/actions/workflows/ci.yml)
 
-**CAIP-122 / SIWE (EIP-4361) CACAO mint + verify in pure Clojure.** A CACAO is a
-self-sovereign, signed, expiring capability — a SIWE plaintext carrying an issuer
+Two self-custodied authentication/capability protocols live here:
+
+- `cacao.*`: CAIP-122-shaped CACAO mint and verify for `did:key` / Ed25519.
+- `siwe.*`: strict EIP-4361 Sign-In with Ethereum for EOA accounts, using the
+  EIP-191 personal-sign envelope, Keccak-256, secp256k1 recovery and EIP-55
+  addresses.
+
+They intentionally share a repository, not a signature format. The historical
+CACAO plaintext resembles SIWE but is Ed25519-signed and is not an Ethereum
+wallet signature. `siwe.*` is the interoperable Ethereum path.
+
+## EIP-4361 SIWE (`siwe.core`, `siwe.edge`)
+
+This is a first-party protocol implementation rather than a wrapper around a
+JavaScript SIWE package:
+
+- `siwe.core` parses and renders the EIP-4361 ABNF, enforces bounded canonical
+  LF-only messages, and checks relying-party `scheme`, `domain`, `URI`, `nonce`
+  and chain bindings.
+- `siwe.edge` implements ERC-191 hashing, low-S secp256k1 public-key recovery,
+  EIP-55 checksumming and the issued/not-before/expiration window.
+- Successful verification yields a chain-bound
+  `did:pkh:eip155:<chain-id>:<address>` principal. Sessions bind to that address,
+  not ENS or another mutable resolution.
+
+The only cryptographic dependencies are `@noble/curves` and `@noble/hashes`.
+They supply curve and hash primitives; the message grammar and relying-party
+policy are implemented here. Runtime consumers must install the exact versions
+listed in `package.json`.
+
+The current verifier is explicitly **EOA-only**. A claimed smart-contract wallet
+does not silently fall back to EOA recovery. A host that supports contract
+accounts must add a chain-specific ERC-1271 `isValidSignature` path and define
+session invalidation for contract state changes.
+
+```clojure
+(require '[siwe.core :as siwe]
+         '[siwe.edge :as siwe-edge])
+
+(def plaintext
+  (siwe/format-message
+   {:scheme "https"
+    :domain "auth.example.com"
+    :address "0x..."
+    :statement "Sign in. This request does not send a transaction."
+    :uri "https://auth.example.com/sign-in"
+    :version "1"
+    :chain-id "1"
+    :nonce "A1b2C3d4E5f6"
+    :issued-at "2026-08-26T03:00:00Z"
+    :expiration-time "2026-08-26T03:05:00Z"}))
+
+(siwe-edge/verify plaintext "0x<r-s-v>"
+                  {:scheme "https"
+                   :domain "auth.example.com"
+                   :uri "https://auth.example.com/sign-in"
+                   :nonce "A1b2C3d4E5f6"
+                   :chain-ids #{"1"}})
+```
+
+Run `clojure -M:test` for the portable grammar suite and
+`npm run test:siwe-edge` for real ERC-191/secp256k1 recovery.
+
+## CACAO (`cacao.*`)
+
+A CACAO is a self-sovereign, signed, expiring capability carrying an issuer
 DID, an audience, a nonce/expiry and a `resources` grant, serialized as CBOR
 (`{h,p,s}`) and Ed25519-signed. It's the **no-server-key** authorization for
 kotoba / kotobase (datom-transact leashes, `kotobase:pin`, …): minted in the
