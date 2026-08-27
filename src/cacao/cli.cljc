@@ -7,7 +7,8 @@
 ;;
 ;; A tiny, self-sovereign command surface over the kotoba identity stack:
 ;;
-;;   kotoba seed                         → mint a fresh raw Ed25519 seed (base64). SECRET.
+;;   kotoba id --address <0x…>           → derive did:pkh:eip155:8453:… (wallet-first).
+;;   kotoba seed                         → mint a fresh raw Ed25519 seed (legacy/internal). SECRET.
 ;;   kotoba did    --seed <b64>          → derive the public did:key:z6Mk… from a seed.
 ;;   kotoba cacao  --seed <b64> --aud <did> --resource <uri> [--ttl-h N] [--nonce X]
 ;;                                       → mint a signed, expiring CACAO capability (base64).
@@ -32,9 +33,10 @@
 ;; ── pure argument handling (portable .cljc) ───────────────────────────────────
 
 (def usage
-  (str "kotoba — DID / CACAO / seed identity primitives\n"
+  (str "kotoba — wallet-first identity / CACAO primitives\n"
        "\n"
        "USAGE\n"
+       "  kotoba id    --address <0x-address> [--chain-id <eip155-id>]\n"
        "  kotoba seed\n"
        "  kotoba did   --seed <b64>\n"
        "  kotoba cacao --seed <b64> --aud <did> --resource <uri> [--resource <uri> …]\n"
@@ -42,12 +44,16 @@
        "  kotoba cacao --seed <b64> --apex [--op-cap <cap> …] [--ttl-h <hours>] [--nonce <str>]\n"
        "\n"
        "COMMANDS\n"
-       "  seed   Generate a new 32-byte Ed25519 seed, base64. THIS IS SECRET — keep it safe.\n"
-       "  did    Derive the public did:key:z6Mk… from a seed. Safe to publish.\n"
+       "  id     Derive did:pkh from a public EVM wallet address (default: Base 8453).\n"
+       "         Proof of control happens with SIWE; no private key enters this CLI.\n"
+       "  seed   Legacy/internal: generate a raw Ed25519 seed. THIS IS SECRET.\n"
+       "  did    Legacy/internal: derive did:key:z6Mk… from an Ed25519 seed.\n"
        "  cacao  Mint a signed, expiring CACAO capability (iss is derived from the seed).\n"
        "         With --apex, mint one the kotobase.net apex accepts (see --apex below).\n"
        "\n"
        "OPTIONS\n"
+       "  --address <0x>  public Ethereum wallet address\n"
+       "  --chain-id <n>  EIP-155 chain id for `id` (default 8453 / Base)\n"
        "  --seed <b64>    raw 32-byte Ed25519 seed, base64-encoded (SECRET)\n"
        "  --aud <did>     audience DID the CACAO is minted for\n"
        "  --resource <u>  a kotoba:// resource URI to grant; repeatable\n"
@@ -91,11 +97,27 @@
   [v]
   (cond (nil? v) [] (vector? v) v :else [v]))
 
+(def ^:private ethereum-address-re #"^0x[0-9A-Fa-f]{40}$")
+
+(defn wallet-did
+  "Public EVM address -> chain-bound did:pkh. Returns nil for invalid input."
+  ([address] (wallet-did address 8453))
+  ([address chain-id]
+   (when (and (string? address)
+              (re-matches ethereum-address-re address)
+              (integer? chain-id)
+              (pos? chain-id))
+     (str "did:pkh:eip155:" chain-id ":" (str/lower-case address)))))
+
 (defn validate
   "Given a command keyword and parsed opts, return a seq of human-readable error
    strings (empty when the invocation is well-formed). Pure."
   [command opts]
   (case command
+    :id    (cond-> []
+             (not (:address opts)) (conj "--address <0x-address> is required")
+             (and (:address opts) (not (re-matches ethereum-address-re (str (:address opts)))))
+             (conj "--address must be a 20-byte 0x Ethereum address"))
     :seed  []
     :did   (if (:seed opts) [] ["--seed <b64> is required"])
     ;; --apex supplies aud/domain/header/resources itself, so demanding them
@@ -189,6 +211,13 @@
                (do (doseq [e errs] (eprintln (str "error: " e)))
                    (eprintln "") (eprintln usage) 2)
                (case command
+                 :id    (let [chain-id (try
+                                         (Long/parseLong (str (or (:chain-id opts) "8453")))
+                                         (catch Exception _ nil))
+                              did (wallet-did (:address opts) chain-id)]
+                          (if did
+                            (do (println did) 0)
+                            (do (eprintln "error: --chain-id must be a positive EIP-155 integer") 2)))
                  :seed  (let [s (gen-seed)]
                           (eprintln "# SECRET Ed25519 seed — store it safely; anyone with it IS you.")
                           (eprintln "# Its public did:key: " (ed/did-key-from-seed s))

@@ -178,7 +178,7 @@ Built on **com-junkawasaki/ed25519-clj** (sign / did:key) +
 **com-junkawasaki/dag-cbor-clj** (order-preserving CBOR). No native deps,
 babashka-friendly.
 
-## `kotoba` CLI — DID / CACAO / seed
+## `kotoba` CLI — wallet-first ID / CACAO
 
 A tiny CLI (`bin/kotoba`, or `clojure -M -m cacao.cli …`) over the identity
 stack. Pure argument handling lives in `src/cacao/cli.cljc` (portable `.cljc`);
@@ -186,6 +186,20 @@ all crypto + IO (SecureRandom, base64, `java.time` instants, and the `ed25519` /
 `cacao` requires) sits behind `#?(:clj …)`. JCA supplies Ed25519 sign/verify and
 `ed25519.core` derives the public key in pure Clojure, so there is no native
 crypto dependency.
+
+The default public identity path starts from the user's existing wallet. It
+derives a chain-bound `did:pkh` from the public address, with Base mainnet as
+the default chain. The CLI never requests a wallet private key; SIWE proves
+control when entering a relying service.
+
+```bash
+$ bin/kotoba id --address 0xA00366234D29d4F882088048c0B2fa0dB7302D4E
+did:pkh:eip155:8453:0xa00366234d29d4f882088048c0b2fa0db7302d4e
+```
+
+The older `seed`, `did`, and Ed25519 CACAO commands remain available for
+internal actors and compatibility, but they are no longer presented as the
+human login default.
 
 > `bb kotoba …` is **unavailable**. babashka was retired as this workspace's
 > script host (ADR-2607173000), and that conversion also deleted the `bb.edn`
