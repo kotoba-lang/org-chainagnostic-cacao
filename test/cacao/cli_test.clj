@@ -24,12 +24,24 @@
   (is (= ["x" "y"] (cli/as-vec ["x" "y"]))))
 
 (deftest validate-rules
+  (is (seq (cli/validate :id {})))
+  (is (= [] (cli/validate :id {:address "0xA00366234D29d4F882088048c0B2fa0dB7302D4E"})))
+  (is (seq (cli/validate :id {:address "did:key:zLegacy"})))
   (is (= [] (cli/validate :seed {})))
   (is (seq (cli/validate :did {})) "did needs --seed")
   (is (= [] (cli/validate :did {:seed "s"})))
   (is (= 3 (count (cli/validate :cacao {}))) "cacao needs seed, aud, resource")
   (is (= [] (cli/validate :cacao {:seed "s" :aud "a" :resource "r"})))
   (is (seq (cli/validate :bogus {}))))
+
+(deftest wallet-id-is-base-first-and-never-needs-a-seed
+  (let [address "0xA00366234D29d4F882088048c0B2fa0dB7302D4E"]
+    (is (= "did:pkh:eip155:8453:0xa00366234d29d4f882088048c0b2fa0db7302d4e"
+           (cli/wallet-did address)))
+    (is (= "did:pkh:eip155:1:0xa00366234d29d4f882088048c0b2fa0db7302d4e"
+           (cli/wallet-did address 1)))
+    (is (nil? (cli/wallet-did "did:key:zLegacy")))
+    (is (nil? (cli/wallet-did address 0)))))
 
 ;; ── crypto (JVM) ──────────────────────────────────────────────────────────────
 

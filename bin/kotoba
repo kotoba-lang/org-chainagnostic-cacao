@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# kotoba — DID / CACAO / seed identity-primitives CLI.
+# kotoba — wallet-first ID / CACAO identity-primitives CLI.
 #
 # Thin launcher: runs cacao.cli/-main. It used to exec `bb -m cacao.cli`, but
 # babashka was retired as this workspace's script host (ADR-2607173000) and this
