@@ -139,6 +139,10 @@
                    (cacao/mint {:seed seed :aud cacao/kotobase-apex-aud
                                 :domain cacao/kotobase-apex-domain
                                 :iat "2026-07-27T10:15:30.123456789Z" :exp exp-iso
+                                ;; deliberately non-conforming: this vector's
+                                ;; whole job is to be refused, so it opts out
+                                ;; of mint's instant normalization.
+                                :instants :raw
                                 :nonce "probe-fracsec" :header-type "caip122"
                                 :resources (cacao/kotobase-apex-resources did)}))}
 
@@ -151,6 +155,7 @@
                    (cacao/mint {:seed seed :aud cacao/kotobase-apex-aud
                                 :domain cacao/kotobase-apex-domain
                                 :iat "1785140130" :exp exp-iso
+                                :instants :raw
                                 :nonce "probe-epoch" :header-type "caip122"
                                 :resources (cacao/kotobase-apex-resources did)}))}
 
