@@ -67,6 +67,48 @@
                 (seq resources) (into (map #(str "- " %) resources)))]
     (str/join "\n" lines)))
 
+(def ^:private instant-re #"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+
+(defn normalize-instant
+  "A CACAO timestamp in the ONLY shape every verifier of this format parses:
+  `YYYY-MM-DDTHH:MM:SSZ`. Milliseconds are truncated; nil passes through.
+
+  Why truncate rather than pass through. `(.toISOString (js/Date.))` and
+  `Instant/toString` both emit a fractional part, and it is the obvious thing
+  for a caller to hand `mint`. `cacao.core/verify` compares instants as
+  STRINGS and tolerates it, so such a CACAO verifies here — and
+  `cacao.edge.verify/parse-utc-seconds` rejects the whole token with
+  `invalid CACAO iat`, which is the verifier a Cloudflare Worker runs.
+
+  Measured 2026-08-31: every CACAO minted by com-junkawasaki/root's x402 bot
+  payer carried a millisecond `iat`, so every bot payment would have been
+  refused at the ledger — by a message about the timestamp, on a token whose
+  signature and scope were both correct.
+
+  Truncation is not a semantic change: the wire format has second precision,
+  so the fraction was never going to be part of what any verifier read. What
+  it changes is WHERE the mismatch surfaces — here, in the signer's own
+  process, rather than as a 401 from someone else's edge.
+
+  `mint` takes `:instants :raw` to bypass this. `cacao.conformance` needs it:
+  its `:iat-with-fractional-seconds` and `:iat-as-epoch-seconds` vectors exist
+  to prove a verifier REFUSES those encodings, and a library that cannot
+  construct an invalid vector cannot test its own verifier. That is the only
+  legitimate reason to ask for one, which is why it is a named argument rather
+  than the default."
+  [x]
+  (when x
+    (let [s (str x)]
+      (cond
+        (re-matches instant-re s) s
+        (re-matches #"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$" s)
+        (str (subs s 0 19) "Z")
+        :else (throw (ex-info (str "cacao/mint: :iat and :exp must be UTC instants like "
+                                   "2026-08-31T10:00:00Z — got " (pr-str s)
+                                   ". A shape no verifier parses is refused here rather "
+                                   "than at someone else's edge.")
+                              {:instant s}))))))
+
 (defn mint
   "Mint a CACAO signed with a raw 32-byte Ed25519 seed. `iss` is DERIVED from the
    seed (issuer binding) — never passed in. Returns {:cacao-b64 :iss :siwe}.
@@ -74,7 +116,8 @@
    (default kotoba.etzhayyim.com) :version (default \"1\") :statement
    :header-type (default \"eip4361\"; the kotobase apex wants \"caip122\" —
    see `mint-kotobase-apex`, which is what callers targeting it should use)
-   :sig-encoding (`:base64` default, or `:base64url`).
+   :sig-encoding (`:base64` default, or `:base64url`) :instants (`:normalized`
+   default, or `:raw` — see `normalize-instant`).
 
    THE SIGNATURE ENCODING IS PART OF THE CONTRACT AND IS NOT SELF-DESCRIBING.
    A verifier decodes those bytes one way; hand it the other and Ed25519
@@ -87,8 +130,9 @@
    suite can PROVE which one a deployment takes, not because a caller should
    choose."
   [{:keys [seed aud iat exp nonce resources statement domain version header-type
-           sig-encoding]
-    :or {domain "kotoba.etzhayyim.com" version "1" sig-encoding :base64}}]
+           sig-encoding instants]
+    :or {domain "kotoba.etzhayyim.com" version "1" sig-encoding :base64
+         instants :normalized}}]
   (when (nil? nonce)
     (throw (ex-info "cacao/mint: :nonce is required — verify/verify-chain's
                      nonce-replay protection has no effect on a CACAO minted
@@ -96,6 +140,9 @@
                      un-dedupeable, not as replay-safe)"
                     {:aud aud})))
   (let [iss (ed/did-key-from-seed seed)
+        raw-instants? (= :raw instants)
+        iat (if raw-instants? iat (normalize-instant iat))
+        exp (if raw-instants? exp (normalize-instant exp))
         msg (siwe-message {:iss iss :aud aud :iat iat :exp exp :nonce nonce
                            :domain domain :version version :statement statement
                            :resources resources})

@@ -125,10 +125,17 @@
 
 ;; The exact EIP-4361 plaintext cacao.core/mint signs and cacao.core/verify
 ;; reconstructs from the CBOR payload. Mirrors cacao.core/siwe-message
-;; line-for-line, including that `statement` is accepted by the Clojure
-;; function's signature but never round-tripped through the CBOR `p` map —
-;; so it never appears here either. This must accept/reject exactly what the
-;; canonical JVM verifier would, not a hypothetically "more correct" version.
+;; line-for-line. This must accept/reject exactly what the canonical JVM
+;; verifier would, not a hypothetically "more correct" version.
+;;
+;; Until 2026-08-31 this comment read "…including that `statement` is accepted
+;; by the Clojure function's signature but never round-tripped through the CBOR
+;; `p` map — so it never appears here either". That was TRUE when it was
+;; written and stopped being true when core started carrying `statement` in
+;; `p` (its own comment records that fix: "every CACAO minted with :statement
+;; was unverifiable, silently, from the day the option existed"). The fix
+;; landed on one side of a mirror, and the mirror kept a comment explaining why
+;; it did not need it.
 (defn siwe-message
   "Public (not `-`) so cacao.edge.verify-mint can reconstruct the
   identical plaintext when minting — verify and mint must agree byte-for-
@@ -143,9 +150,20 @@
         nonce (aget payload "nonce")
         iat (aget payload "iat")
         exp (aget payload "exp")
+        statement (aget payload "statement")
         resources (aget payload "resources")
         lines (atom [(str domain " wants you to sign in with your Ethereum account:")
                      addr ""])]
+    ;; `statement` is part of the signed text (`cacao.core/siwe-message` puts
+    ;; it here) and this reconstruction did not read it, so a CACAO carrying
+    ;; one verified as a BAD SIGNATURE — indistinguishable from a wrong key.
+    ;; Measured 2026-08-31: `cacao.core/mint` has carried statement in both the
+    ;; signed text and the payload since the day the option existed, and its
+    ;; own comment records the equivalent bug being fixed there. Nothing
+    ;; round-tripped core's mint against THIS verifier, so the fix never
+    ;; reached the half the murakumo Worker calls.
+    (when (and statement (not= "" statement))
+      (swap! lines conj statement ""))
     (swap! lines conj (str "URI: " aud) (str "Version: " version)
            "Chain ID: 1" (str "Nonce: " nonce) (str "Issued At: " iat))
     (when exp
@@ -179,6 +197,7 @@
                                :nonce (aget p "nonce")
                                :domain (aget p "domain")
                                :version (aget p "version")
+                               :statement (aget p "statement")
                                :resources (aget p "resources")}
                   sig-bytes (base64->bytes (aget s "s"))
                   pub-bytes (did-key->pubkey iss)]
