@@ -59,7 +59,7 @@
 ;; (ADR-2608261100).
 
 (ns siwe.window
-  (:export [instant-ok? instant-seconds problem]))
+  (:export [main instant-ok? instant-seconds problem]))
 
 ;; --- document accessors -----------------------------------------------------
 
@@ -251,3 +251,26 @@
       :not-yet-valid
 
       :else :none)))
+
+;; --- the artifact's own conformance check ------------------------------------------
+;;
+;; `main` is the browser profile's entry point -- `runtime/browser-host.mjs`
+;; refuses to instantiate a module without one -- and it is not a stub. It
+;; runs the instant reader back over three spellings and answers 0 only when
+;; each still decides the way this object was built to decide, so a COMPILED
+;; artifact can be asked whether it is itself by a host that knows nothing
+;; about EIP-4361.
+;;
+;; The document-taking `problem` is deliberately NOT here: `main` takes no
+;; arguments, so it would have to build the fields itself, and a module's
+;; fuel is a private global baked in at compile time (512 by default) spent
+;; over the life of an INSTANCE. The suite calls `problem` with documents
+;; the host builds, which is both cheaper and closer to how a relying party
+;; would.
+
+(defn main [] :i64
+  (cond
+    (if (instant-ok? "2026-08-31T12:34:56Z") false true) 1
+    (if (instant-ok? "2016-12-31T23:59:60Z") true false) 2
+    (if (instant-ok? "2100-02-29T00:00:00Z") true false) 3
+    :else 0))
