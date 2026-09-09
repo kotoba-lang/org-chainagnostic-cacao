@@ -4,7 +4,12 @@
  ;; monorepo siblings present (ADR-2607022400). SHAs are each sibling repo's
  ;; origin/main HEAD as of 2026-07-02, obtained via
  ;;   gh api repos/kotoba-lang/<repo>/commits/main --jq .sha
- :deps {;; The covering relation `covers?`/`verify-chain` attenuate against.
+ :deps {
+        ;; kotoba.lang.text, not clojure.string. Pinned as an explicit floor:
+        ;; tools.deps takes the NEWEST sha it is shown, so without a floor here
+        ;; this repo silently rides whatever a sibling happens to name.
+        io.github.kotoba-lang/text {:git/sha "73bdb13ae7a3d004b44bca08be03a3191157a38f"}
+       ;; The covering relation `covers?`/`verify-chain` attenuate against.
         ;; Not part of CAIP-122 -- resource covering is this fleet's extension,
         ;; and it is one partial order shared with every other consumer rather
         ;; than a substring test repeated per scheme.

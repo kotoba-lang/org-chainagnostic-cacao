@@ -10,7 +10,7 @@
   are a relying-party DoS policy, which the EIP explicitly leaves to
   implementers. Messages use LF exactly; CRLF and trailing newlines reject so
   there is one byte representation for one parsed value."
-  (:require [clojure.string :as str]))
+  (:require [kotoba.lang.text :as str]))
 
 (def max-message-length 8192)
 (def max-domain-length 255)
@@ -202,4 +202,4 @@
 (defn principal-did
   "CAIP-10-backed DID for the Ethereum account a valid SIWE session proves."
   [{:keys [chain-id address]}]
-  (str "did:pkh:eip155:" chain-id ":" (str/lower-case address)))
+  (str "did:pkh:eip155:" chain-id ":" (str/lower address)))
