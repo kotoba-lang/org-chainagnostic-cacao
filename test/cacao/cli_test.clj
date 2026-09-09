@@ -1,5 +1,5 @@
 (ns cacao.cli-test
-  (:require [clojure.string :as str]
+  (:require [kotoba.lang.text :as str]
             [clojure.test :refer [deftest is testing]]
             [cacao.cli :as cli]
             [ed25519.core :as ed]
@@ -56,7 +56,7 @@
         d2 (cli/seed->did seed-b64)]
     (is (= d1 d2) "same seed → same did every time")
     (is (= (ed/did-key-from-seed seed-bytes) d1) "matches ed25519.core derivation")
-    (is (clojure.string/starts-with? d1 "did:key:z6Mk"))))
+    (is (str/starts-with? d1 "did:key:z6Mk"))))
 
 (deftest gen-seed-is-32-bytes-and-random
   (is (= 32 (count (cli/gen-seed))))

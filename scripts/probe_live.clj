@@ -1,6 +1,6 @@
 ;; Run the conformance suite against a live kotobase deployment.
 ;;   clojure -M:local -i scripts/probe_live.clj -e '(probe! "https://kotobase.net")'
-(require '[cacao.conformance :as conf] '[cacao.core :as cacao])
+(require '[kotoba.lang.text] '[cacao.conformance :as conf] '[cacao.core :as cacao])
 (import '[java.net URI]
         '[java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers HttpResponse$BodyHandlers]
         '[java.time Instant]
@@ -12,10 +12,10 @@
   clone with no deps beyond the library, so it can be pointed at a deployment
   during an incident."
   [m]
-  (str "{" (clojure.string/join
+  (str "{" (kotoba.lang.text/join
             "," (for [[k v] m]
                   (str "\"" (name k) "\":\""
-                       (clojure.string/escape (str v) {\" "\\\"" \\ "\\\\"})
+                       (kotoba.lang.text/escape (str v) {\" "\\\"" \\ "\\\\"})
                        "\"")))
        "}"))
 

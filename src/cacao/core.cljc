@@ -31,7 +31,7 @@
 ;; node:crypto) and cbor.core's Uint8Array convention — base64 goes through
 ;; js/Buffer, everything else here was already pure data + string logic.
 (ns cacao.core
-  (:require [clojure.string :as str]
+  (:require [kotoba.lang.text :as str]
             [ed25519.core :as ed]
             [cbor.core :as cbor]
             [authority.scope :as scope])

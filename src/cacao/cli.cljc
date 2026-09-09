@@ -22,7 +22,7 @@
 ;; native crypto dep. We DERIVE the issuer DID from the seed and NEVER print the seed
 ;; except from the `seed` command (whose whole job is to emit it, with a stderr warning).
 (ns cacao.cli
-  (:require [clojure.string :as str]
+  (:require [kotoba.lang.text :as str]
             #?@(:clj [[ed25519.core :as ed]
                       [cacao.core :as cacao]]))
   #?(:clj (:import (java.security SecureRandom)
@@ -107,7 +107,7 @@
               (re-matches ethereum-address-re address)
               (integer? chain-id)
               (pos? chain-id))
-     (str "did:pkh:eip155:" chain-id ":" (str/lower-case address)))))
+     (str "did:pkh:eip155:" chain-id ":" (str/lower address)))))
 
 (defn validate
   "Given a command keyword and parsed opts, return a seq of human-readable error

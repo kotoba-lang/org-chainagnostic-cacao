@@ -53,7 +53,7 @@
   them do. `reason-visible?` in the report is the measurement of that gap —
   when the edge starts returning reason codes, this suite is where that
   becomes checkable."
-  (:require [clojure.string :as str]
+  (:require [kotoba.lang.text :as str]
             [cacao.core :as cacao]))
 
 ;; ── the vocabulary, in one place ─────────────────────────────────────────────

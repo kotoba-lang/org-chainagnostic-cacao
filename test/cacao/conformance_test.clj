@@ -2,7 +2,7 @@
   "The suite must itself be right: a case that differs in more than one way
   proves nothing, and a runner that scores a measurement as a failure would
   make the report unreadable."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.lang.text] [clojure.test :refer [deftest is testing]]
             [cacao.core :as cacao]
             [cacao.conformance :as conf]))
 
@@ -25,23 +25,23 @@
       (testing "missing-pin keeps a valid graph scope"
         (let [rs (:resources (payload-of :missing-pin-capability))]
           (is (not (some #{cacao/kotobase-pin-capability} rs)))
-          (is (some #(clojure.string/starts-with? % "kotoba://graph/") rs))))
+          (is (some #(kotoba.lang.text/starts-with? % "kotoba://graph/") rs))))
       (testing "cid-scope keeps the pin capability"
         (let [rs (:resources (payload-of :graph-scope-is-a-cid))]
           (is (some #{cacao/kotobase-pin-capability} rs))
-          (is (some #(clojure.string/starts-with? % "kotoba://graph/bafy") rs))))
+          (is (some #(kotoba.lang.text/starts-with? % "kotoba://graph/bafy") rs))))
       (testing "the timestamp cases keep both required resources"
         (doseq [id [:iat-with-fractional-seconds :iat-as-epoch-seconds]]
           (let [rs (:resources (payload-of id))]
             (is (some #{cacao/kotobase-pin-capability} rs))
-            (is (some #(clojure.string/starts-with? % "kotoba://graph/did:key:") rs))))))))
+            (is (some #(kotoba.lang.text/starts-with? % "kotoba://graph/did:key:") rs))))))))
 
 (deftest the-vocabulary-cases-are-mirror-images
   (testing "together they report WHICH backend is answering -- nothing else
             observable distinguishes that"
     (let [by-id (into {} (map (juxt :case/id identity) (conf/cases opts)))
           caps (fn [id] (->> (:resources (cacao/decode-payload (:case/cacao (by-id id))))
-                             (filter #(clojure.string/starts-with? % "kotoba://can/"))
+                             (filter #(kotoba.lang.text/starts-with? % "kotoba://can/"))
                              set))]
       (is (contains? (caps :xrpc-vocabulary-only) "kotoba://can/datom:read"))
       (is (not (contains? (caps :xrpc-vocabulary-only) "kotoba://can/graph:query")))
@@ -88,7 +88,7 @@
           some* (conf/run (fn [_ _] {:status 401 :body "{\"error\":\"Unauthorized\",\"reason\":\"cacao/iat-format\"}"}) opts)]
       (is (false? (:reason-visible? (:summary none))))
       (is (true? (:reason-visible? (:summary some*))))
-      (is (clojure.string/includes? (conf/report none) "carry NO reason")))))
+      (is (kotoba.lang.text/includes? (conf/report none) "carry NO reason")))))
 
 (deftest the-signature-encoding-cases-are-mirror-images
   (testing "a correct signature over the correct message, differing only in
@@ -158,8 +158,8 @@
 (deftest the-pattern-cases-differ-only-in-the-subject-position
   (let [by-id (into {} (map (juxt :case/id identity) (conf/request-cases (assoc opts :did "did:key:zTest"))))
         q #(:query_edn (:case/request (by-id %)))]
-    (is (clojure.string/starts-with? (q :pattern-wildcard-subject) "[nil "))
-    (is (clojure.string/starts-with? (q :pattern-bound-subject) "[\"mp.probe/x\""))
+    (is (kotoba.lang.text/starts-with? (q :pattern-wildcard-subject) "[nil "))
+    (is (kotoba.lang.text/starts-with? (q :pattern-bound-subject) "[\"mp.probe/x\""))
     (is (= :accept (:case/expect (by-id :pattern-wildcard-subject)))
         "every bounded read in marketplace.edge rests on this")
     (is (= :unknown (:case/expect (by-id :pattern-bound-subject)))

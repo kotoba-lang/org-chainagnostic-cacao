@@ -1,5 +1,5 @@
 (ns cacao.core-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.lang.text] [clojure.test :refer [deftest is testing]]
             [cacao.core :as cacao]
             [ed25519.core :as ed])
   (:import (java.security KeyPairGenerator)
@@ -144,14 +144,14 @@
         msg (cacao/siwe-message {:iss iss :aud "did:key:zAUD" :iat "T0" :exp "T1"
                                  :nonce "n1" :domain "kotobase.net" :version "1"
                                  :resources ["r1" "r2"]})]
-    (is (clojure.string/includes? msg "kotobase.net wants you to sign in"))
-    (is (clojure.string/includes? msg "Chain ID: 1"))
-    (is (clojure.string/includes? msg "Resources:\n- r1\n- r2"))))
+    (is (kotoba.lang.text/includes? msg "kotobase.net wants you to sign in"))
+    (is (kotoba.lang.text/includes? msg "Chain ID: 1"))
+    (is (kotoba.lang.text/includes? msg "Resources:\n- r1\n- r2"))))
 
 (deftest auth-header-shape
   (let [b (cacao/mint (opts-for (seed)))
         h (cacao/auth-header b)]
-    (is (clojure.string/starts-with? (:authorization h) "CACAO "))
+    (is (kotoba.lang.text/starts-with? (:authorization h) "CACAO "))
     (is (= (:iss b) (:x-kotoba-did h)))))
 
 ;; ── delegation chains ─────────────────────────────────────────────────────────
