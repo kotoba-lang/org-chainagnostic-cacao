@@ -24,7 +24,7 @@
   (:require ["node:fs" :as fs]
             ["node:child_process" :as cp]
             ["node:path" :as path]
-            [clojure.string :as str]))
+            [kotoba.lang.text :as str]))
 
 ;; Clojure data -> the tagged document the runtime admits. The same encoding
 ;; `window_guest_document.clj` uses on the interpreter side, so both halves are asked with
