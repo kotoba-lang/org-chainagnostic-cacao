@@ -12,7 +12,7 @@
   this verifier is EOA-only and returns `:contract-account-unsupported` when
   recovered EOA control does not match the claimed address. Hosts may add an
   explicit chain-bound ERC-1271 verifier as a separate policy path."
-  (:require [clojure.string :as str]
+  (:require [kotoba.lang.text :as str]
             [siwe.core :as core]
             ["@noble/curves/secp256k1.js" :refer [secp256k1]]
             ["@noble/hashes/sha3.js" :refer [keccak_256]]))
@@ -44,7 +44,7 @@
   "Canonical EIP-55 address, or nil for a non-address input."
   [address]
   (when (core/ethereum-address? address)
-    (let [lower (str/lower-case (subs address 2))
+    (let [lower (str/lower (subs address 2))
           hash (bytes->hex (keccak_256 (utf8 lower)))]
       (str "0x"
            (apply str
@@ -52,7 +52,7 @@
                    (fn [i ch]
                      (if (and (re-matches #"[a-f]" (str ch))
                               (>= (js/Number.parseInt (str (nth hash i)) 16) 8))
-                       (str/upper-case (str ch))
+                       (str/upper (str ch))
                        ch))
                    lower))))))
 
