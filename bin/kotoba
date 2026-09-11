@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # kotoba — wallet-first ID / CACAO identity-primitives CLI.
 #
-# Thin launcher: runs cacao.cli/-main. It used to exec `bb -m cacao.cli`, but
+# Thin launcher: runs cacao.cli/-main. It used to exec `kbb -m cacao.cli`, but
 # babashka was retired as this workspace's script host (ADR-2607173000) and this
 # repo's bb.edn — which supplied the deps and source paths — was deleted by that
 # conversion, so the launcher had been broken twice over since 2026-07-17.
@@ -11,4 +11,4 @@
 set -euo pipefail
 repo_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_dir"
-exec clojure -M -m cacao.cli "$@"
+exec kbb -M -m cacao.cli "$@"
