@@ -62,7 +62,7 @@ session invalidation for contract state changes.
                    :chain-ids #{"1"}})
 ```
 
-Run `clojure -M:test` for the portable grammar suite and
+Run `kbb -M:test` for the portable grammar suite and
 `npm run test:siwe-edge` for real ERC-191/secp256k1 recovery.
 
 ## CACAO (`cacao.*`)
@@ -180,7 +180,7 @@ babashka-friendly.
 
 ## `kotoba` CLI — wallet-first ID / CACAO
 
-A tiny CLI (`bin/kotoba`, or `clojure -M -m cacao.cli …`) over the identity
+A tiny CLI (`bin/kotoba`, or `kbb -M -m cacao.cli …`) over the identity
 stack. Pure argument handling lives in `src/cacao/cli.cljk` (portable `.cljc`);
 all crypto + IO (SecureRandom, base64, `java.time` instants, and the `ed25519` /
 `cacao` requires) sits behind `#?(:clj …)`. JCA supplies Ed25519 sign/verify and
@@ -201,11 +201,11 @@ The older `seed`, `did`, and Ed25519 CACAO commands remain available for
 internal actors and compatibility, but they are no longer presented as the
 human login default.
 
-> `bb kotoba …` is **unavailable**. babashka was retired as this workspace's
+> `kbb -M:kotoba …` is **unavailable**. babashka was retired as this workspace's
 > script host (ADR-2607173000), and that conversion also deleted the `bb.edn`
 > which supplied this CLI's deps and source paths; `scripts/tasks.edn` was left
 > a literal empty registry (ADR-2608131600). `bin/kotoba` itself exec'd
-> `bb -m cacao.cli` until 2026-08-13 and now execs `clojure -M -m cacao.cli`;
+> `kbb -m cacao.cli` until 2026-08-13 and now execs `kbb -M -m cacao.cli`;
 > a seed → `did:key:z6Mk…` round trip through it was verified that day.
 
 ```bash
@@ -249,7 +249,7 @@ equivalent:
 Both halves produce and accept the same wire format — a CACAO minted on the
 JVM by `cacao.core/mint` verifies at the edge and vice versa
 (`test/edge_smoke.cljk` covers the edge round trip; run it with
-`nbb --classpath src:test test/edge_smoke.cljk` on Node ≥ 20).
+`kbb --backend sci --classpath src:test test/edge_smoke.cljk` on Node ≥ 20).
 
 A CACAO minted by `cacao.edge.mint` is **server-custodied, passkey-gated** —
 not a non-custodial wallet. `cacao.edge.verify` cannot tell the two apart
@@ -258,7 +258,7 @@ must be documented by whoever mints, not detected by whoever verifies.
 
 ## Correctness
 
-`clojure -M:test` (61 tests / 229 assertions, verified 2026-08-13; the `bb test`
+`kbb -M:test` (61 tests / 229 assertions, verified 2026-08-13; the `kbb -M:test`
 that used to be listed alongside it is unavailable, see above): mint→verify
 round-trip + issuer binding, tamper
 rejection, SIWE plaintext shape, header shape, `:now` freshness, nonce-replay

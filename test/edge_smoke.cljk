@@ -1,9 +1,9 @@
 ;; nbb (ClojureScript-on-Node) smoke for the edge mint/verify pair — the
-;; WebCrypto half of this repo, which the JVM test suite (clojure -M:test)
+;; WebCrypto half of this repo, which the JVM test suite (kbb -M:test)
 ;; cannot reach at all: cacao.edge.* is CLJS-only by construction
 ;; (js/crypto.subtle, js/Uint8Array, js/btoa).
 ;;
-;;   nbb --classpath src:test test/edge_smoke.cljk
+;;   kbb --backend sci --classpath src:test test/edge_smoke.cljk
 ;;
 ;; Requires a Node with Ed25519 in WebCrypto (Node >= 20). Exits nonzero on
 ;; any failure. Mints with cacao.edge.mint and verifies with

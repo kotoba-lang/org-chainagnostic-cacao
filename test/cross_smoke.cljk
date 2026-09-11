@@ -3,7 +3,7 @@
 ;; uses) verified by `cacao.edge.verify` (the WebCrypto verifier a Cloudflare
 ;; Worker runs).
 ;;
-;;   nbb --classpath src:test test/cross_smoke.cljk
+;;   kbb --backend sci --classpath src:test test/cross_smoke.cljk
 ;;
 ;; `edge_smoke.cljs` mints with cacao.edge.mint and verifies with
 ;; cacao.edge.verify — edge against edge. That pairing is real and it is not

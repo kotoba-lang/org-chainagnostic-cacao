@@ -24,7 +24,7 @@
          :git/sha "de18ad29102f9df150e214d756de4719c3c00d7a"}}
  :aliases {;; Monorepo-local dev: resolve the siblings from the working-tree
            ;; checkouts (../org-ietf-ed25519, ../org-ietf-cbor) instead of git.
-           ;; Compose with other aliases, e.g. `clojure -M:local:test`.
+           ;; Compose with other aliases, e.g. `kbb -M:local:test`.
            ;; Preserves the pre-existing sibling-checkout workflow without
            ;; breaking clean git-dep consumption above.
            :local {:override-deps {io.github.kotoba-lang/authority {:local/root "../authority"}
