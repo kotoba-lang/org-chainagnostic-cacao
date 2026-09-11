@@ -3,7 +3,7 @@
 ;; cannot reach at all: cacao.edge.* is CLJS-only by construction
 ;; (js/crypto.subtle, js/Uint8Array, js/btoa).
 ;;
-;;   nbb --classpath src:test test/edge_smoke.cljs
+;;   nbb --classpath src:test test/edge_smoke.cljk
 ;;
 ;; Requires a Node with Ed25519 in WebCrypto (Node >= 20). Exits nonzero on
 ;; any failure. Mints with cacao.edge.mint and verifies with

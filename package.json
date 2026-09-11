@@ -1,9 +1,9 @@
 {
   "private": true,
   "scripts": {
-    "task": "nbb scripts/run-task.cljs",
-    "tasks": "nbb scripts/run-task.cljs",
-    "test:siwe-edge": "nbb --classpath src:test test/siwe_edge_smoke.cljs"
+    "task": "nbb scripts/run-task.cljk",
+    "tasks": "nbb scripts/run-task.cljk",
+    "test:siwe-edge": "nbb --classpath src:test test/siwe_edge_smoke.cljk"
   },
   "dependencies": {
     "@noble/curves": "2.3.0",

@@ -1,6 +1,6 @@
 ;; nbb (ClojureScript-on-Node) smoke for the :cljs branch — run with sibling
 ;; checkouts (monorepo layout, same shape as the :local alias):
-;;   nbb --classpath "src:../org-ietf-ed25519/src:../org-ietf-cbor/src" test/nbb_smoke.cljs
+;;   nbb --classpath "src:../org-ietf-ed25519/src:../org-ietf-cbor/src" test/nbb_smoke.cljk
 ;; Exits nonzero on any failure. mint + verify + verify-chain (2-link
 ;; sub-delegation, resource-escalation rejection, expiry, nonce-replay) all
 ;; on the Node runtime; JVM⇄nbb byte-level equivalence is guaranteed by

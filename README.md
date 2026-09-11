@@ -181,7 +181,7 @@ babashka-friendly.
 ## `kotoba` CLI — wallet-first ID / CACAO
 
 A tiny CLI (`bin/kotoba`, or `clojure -M -m cacao.cli …`) over the identity
-stack. Pure argument handling lives in `src/cacao/cli.cljc` (portable `.cljc`);
+stack. Pure argument handling lives in `src/cacao/cli.cljk` (portable `.cljc`);
 all crypto + IO (SecureRandom, base64, `java.time` instants, and the `ed25519` /
 `cacao` requires) sits behind `#?(:clj …)`. JCA supplies Ed25519 sign/verify and
 `ed25519.core` derives the public key in pure Clojure, so there is no native
@@ -248,8 +248,8 @@ equivalent:
 
 Both halves produce and accept the same wire format — a CACAO minted on the
 JVM by `cacao.core/mint` verifies at the edge and vice versa
-(`test/edge_smoke.cljs` covers the edge round trip; run it with
-`nbb --classpath src:test test/edge_smoke.cljs` on Node ≥ 20).
+(`test/edge_smoke.cljk` covers the edge round trip; run it with
+`nbb --classpath src:test test/edge_smoke.cljk` on Node ≥ 20).
 
 A CACAO minted by `cacao.edge.mint` is **server-custodied, passkey-gated** —
 not a non-custodial wallet. `cacao.edge.verify` cannot tell the two apart
