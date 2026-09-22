@@ -143,3 +143,10 @@
   (into (header 5 2)
         (concat (encode-text "p") (encode-map p-pairs)
                 (encode-text "s") (encode-map [["s" sig-b64]]))))
+
+(defn encode-cacao-envelope-typed
+  "Assemble the direct-origin CACAO signature shape `s={t,s}`."
+  [p-pairs sig-type sig]
+  (into (header 5 2)
+        (concat (encode-text "p") (encode-map p-pairs)
+                (encode-text "s") (encode-map [["t" sig-type] ["s" sig]]))))

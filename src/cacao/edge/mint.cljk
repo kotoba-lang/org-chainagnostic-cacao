@@ -55,6 +55,14 @@
   (let [arr (js/Array.from bytes)]
     (js/btoa (apply str (map js/String.fromCharCode (array-seq arr))))))
 
+(defn bytes->base64url
+  "Unpadded RFC 4648 base64url for direct-origin signature fields."
+  [bytes]
+  (-> (bytes->base64 bytes)
+      (.replace #"\+" "-")
+      (.replace #"/" "_")
+      (.replace #"=+$" "")))
+
 (defn mint
   "Sign `fields` (:domain :aud :version :nonce :iat :exp :resources — all
   strings except :resources, a vector-of-strings or nil) as `iss` using
@@ -96,5 +104,35 @@
                            (:exp fields) (conj ["exp" (:exp fields)])
                            (seq (:resources fields)) (conj ["resources" (vec (:resources fields))]))
                  outer (cbor/encode-cacao-envelope p-pairs sig-b64)]
+             {:cacao-b64 (bytes->base64 (js/Uint8Array.from (clj->js outer)))
+              :iss iss}))))))
+
+(defn mint-kotobase-direct
+  "Sign the direct Kotobase block-origin profile. Unlike the historical edge
+  profile, the signature map explicitly carries `t=EdDSA` and its signature
+  is unpadded base64url. The outer CACAO remains standard base64."
+  [iss sign-fn fields]
+  (let [payload #js {:iss iss
+                     :aud (:aud fields)
+                     :iat (:iat fields)
+                     :exp (:exp fields)
+                     :nonce (:nonce fields)
+                     :domain (:domain fields)
+                     :version (or (:version fields) "1")
+                     :resources (clj->js (or (:resources fields) []))}
+        msg-bytes (.encode (js/TextEncoder.) (verify/siwe-message payload))]
+    (-> (sign-fn msg-bytes)
+        (.then
+         (fn [sig-ab]
+           (let [signature (bytes->base64url (js/Uint8Array. sig-ab))
+                 p-pairs (cond-> [["iss" iss]
+                                  ["aud" (:aud fields)]
+                                  ["iat" (:iat fields)]
+                                  ["nonce" (:nonce fields)]
+                                  ["domain" (:domain fields)]
+                                  ["version" (or (:version fields) "1")]]
+                           (:exp fields) (conj ["exp" (:exp fields)])
+                           (seq (:resources fields)) (conj ["resources" (vec (:resources fields))]))
+                 outer (cbor/encode-cacao-envelope-typed p-pairs "EdDSA" signature)]
              {:cacao-b64 (bytes->base64 (js/Uint8Array.from (clj->js outer)))
               :iss iss}))))))
