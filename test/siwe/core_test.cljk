@@ -1,5 +1,5 @@
 (ns siwe.core-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [kotoba.test :refer [deftest is]]
             [siwe.core :as siwe]))
 
 (def example-fields
