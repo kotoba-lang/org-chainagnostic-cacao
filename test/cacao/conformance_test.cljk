@@ -2,7 +2,7 @@
   "The suite must itself be right: a case that differs in more than one way
   proves nothing, and a runner that scores a measurement as a failure would
   make the report unreadable."
-  (:require [kotoba.lang.text] [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.lang.text] [kotoba.test :refer [deftest is testing]]
             [cacao.core :as cacao]
             [cacao.conformance :as conf]))
 

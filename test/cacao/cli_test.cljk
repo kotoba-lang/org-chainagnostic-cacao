@@ -1,6 +1,6 @@
 (ns cacao.cli-test
   (:require [kotoba.lang.text :as str]
-            [clojure.test :refer [deftest is testing]]
+            [kotoba.test :refer [deftest is testing]]
             [cacao.cli :as cli]
             [ed25519.core :as ed]
             [cacao.core :as cacao])

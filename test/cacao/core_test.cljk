@@ -1,5 +1,5 @@
 (ns cacao.core-test
-  (:require [kotoba.lang.text] [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.lang.text] [kotoba.test :refer [deftest is testing]]
             [cacao.core :as cacao]
             [ed25519.core :as ed])
   (:import (java.security KeyPairGenerator)
