@@ -23,7 +23,7 @@
 ;; nothing.
 
 (ns siwe.window-artifact-test
-  (:require [clojure.edn :as edn]
+  (:require [kotoba.lang.edn :as edn]
             [clojure.java.io :as io]
             [clojure.java.shell :as shell]
             [kotoba.lang.text :as str]
