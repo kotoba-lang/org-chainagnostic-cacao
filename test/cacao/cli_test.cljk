@@ -1,10 +1,10 @@
 (ns cacao.cli-test
-  (:require [kotoba.lang.text :as str]
+  (:require [kotoba.bytes :as kbytes] [kotoba.lang.text :as str]
             [kotoba.test :refer [deftest is testing]]
             [cacao.cli :as cli]
             [ed25519.core :as ed]
             [cacao.core :as cacao])
-  (:import (java.util Base64)
+  (:import
            (java.time Instant)))
 
 ;; ── pure arg handling (portable) ──────────────────────────────────────────────
@@ -45,7 +45,7 @@
 
 ;; ── crypto (JVM) ──────────────────────────────────────────────────────────────
 
-(def ^:private b64enc #(.encodeToString (Base64/getEncoder) %))
+(def ^:private b64enc #(kbytes/base64-encode %))
 
 ;; deterministic fixed seed (bytes 0..31) → base64
 (def ^:private seed-bytes (byte-array (range 0 32)))

@@ -33,7 +33,7 @@
 ;; against `:window-never-opens` from the guest.
 
 (ns siwe.window-kotoba-test
-  (:require [clojure.java.io :as io]
+  (:require [kotoba.io :as io]
             [kotoba.test :refer [deftest is testing]]
             [kotoba.compiler.core :as compiler]
             [kotoba.kir :as ir]
@@ -121,7 +121,7 @@
    "2024-02-29T23:59:59+00:00"])
 
 (deftest guest-source-is-present
-  (is (.exists guest-file) (str "kotoba object not found at " guest-file)))
+  (is (io/exists? guest-file) (str "kotoba object not found at " guest-file)))
 
 (deftest instants-agree-with-java-time
   (doseq [s instants]

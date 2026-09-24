@@ -24,7 +24,7 @@
 
 (ns siwe.window-artifact-test
   (:require [kotoba.lang.edn :as edn]
-            [clojure.java.io :as io]
+            [kotoba.io :as io]
             [clojure.java.shell :as shell]
             [kotoba.lang.text :as str]
             [kotoba.test :refer [deftest is testing]]
@@ -47,7 +47,7 @@
     {:kotoba (let [bin (str amu-root "/bin/kotoba")]
                (when (runs? bin "--help") bin))
      :nbb (when (runs? "nbb" "--version") "nbb")
-     :runtime (.exists (io/file amu-root "runtime/browser-host.mjs"))}))
+     :runtime (io/exists? (io/file amu-root "runtime/browser-host.mjs"))}))
 
 (def ^:private probe
   (delay

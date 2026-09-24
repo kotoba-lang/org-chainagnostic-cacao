@@ -1,9 +1,8 @@
 (ns cacao.core-test
-  (:require [kotoba.lang.text] [kotoba.test :refer [deftest is testing]]
+  (:require [kotoba.bytes :as kbytes] [kotoba.lang.text] [kotoba.test :refer [deftest is testing]]
             [cacao.core :as cacao]
             [ed25519.core :as ed])
-  (:import (java.security KeyPairGenerator)
-           (java.util Base64)))
+  (:import (java.security KeyPairGenerator)))
 
 (defn- seed [] (byte-array (take-last 32 (seq (.getEncoded (.getPrivate
                  (.generateKeyPair (KeyPairGenerator/getInstance "Ed25519"))))))))
@@ -37,9 +36,9 @@
         m (cacao/verify cacao-b64)]
     (is (true? (:valid? m)))
     ;; flip a byte in the signature → invalid
-    (let [raw (.decode (Base64/getDecoder) cacao-b64)
+    (let [raw (kbytes/base64-decode-bytes cacao-b64)
           _ (aset-byte raw (dec (count raw)) (unchecked-byte (bit-xor (aget raw (dec (count raw))) 1)))
-          tampered (.encodeToString (Base64/getEncoder) raw)]
+          tampered (kbytes/base64-encode raw)]
       (is (false? (:valid? (cacao/verify tampered)))))))
 
 (deftest verify-without-now-does-not-check-expiry-unchanged-behavior
@@ -63,9 +62,9 @@
     (testing "before iat the CACAO is not yet valid"
       (is (false? (:valid? (cacao/verify cacao-b64 {:now "2026-06-01T00:00:00Z"})))))
     (testing "a tampered signature is still rejected even with a valid :now"
-      (let [raw (.decode (Base64/getDecoder) cacao-b64)
+      (let [raw (kbytes/base64-decode-bytes cacao-b64)
             _ (aset-byte raw (dec (count raw)) (unchecked-byte (bit-xor (aget raw (dec (count raw))) 1)))
-            tampered (.encodeToString (Base64/getEncoder) raw)]
+            tampered (kbytes/base64-encode raw)]
         (is (false? (:valid? (cacao/verify tampered {:now "2026-07-01T00:00:00Z"}))))))))
 
 ;; ── nonce-replay protection ─────────────────────────────────────────────────
@@ -117,9 +116,9 @@
   ;; nonce could pre-emptively burn a nonce the real holder hasn't used yet.
   (let [store (cacao/fresh-nonce-store)
         {:keys [cacao-b64]} (cacao/mint (opts-for (seed)))
-        raw (.decode (Base64/getDecoder) cacao-b64)
+        raw (kbytes/base64-decode-bytes cacao-b64)
         _ (aset-byte raw (dec (count raw)) (unchecked-byte (bit-xor (aget raw (dec (count raw))) 1)))
-        tampered (.encodeToString (Base64/getEncoder) raw)]
+        tampered (kbytes/base64-encode raw)]
     (is (false? (:valid? (cacao/verify tampered {:nonce-store store}))) "tampered sig rejected")
     (is (true? (:valid? (cacao/verify cacao-b64 {:nonce-store store})))
         "the REAL cacao still verifies afterwards — the tamper attempt didn't burn the nonce")))
@@ -264,10 +263,10 @@
   (let [root (mint-link seed-a did-b [wildcard])
         mid (mint-link seed-b did-c [ledger-main])
         leaf (mint-link seed-c "did:key:zHOLDER" [ledger-main])
-        raw (.decode (Base64/getDecoder) mid)
+        raw (kbytes/base64-decode-bytes mid)
         _ (aset-byte raw (dec (count raw))
                      (unchecked-byte (bit-xor (aget raw (dec (count raw))) 1)))
-        tampered (.encodeToString (Base64/getEncoder) raw)
+        tampered (kbytes/base64-encode raw)
         r (cacao/verify-chain [root tampered leaf])]
     (is (false? (:chain/valid? r)))
     (is (some #(= {:problem :chain/invalid-signature :index 1} %)
