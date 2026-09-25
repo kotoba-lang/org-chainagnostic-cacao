@@ -31,22 +31,21 @@
 ;; node:crypto) and cbor.core's Uint8Array convention — base64 goes through
 ;; js/Buffer, everything else here was already pure data + string logic.
 (ns cacao.core
-  (:require [kotoba.lang.text :as str]
+  (:require [kotoba.bytes :as kbytes] [kotoba.lang.text :as str]
             [ed25519.core :as ed]
             [cbor.core :as cbor]
-            [authority.scope :as scope])
-  #?(:clj (:import (java.util Base64))))
+            [authority.scope :as scope]))
 
 (defn- b64 ^String [b]
-  #?(:clj (.encodeToString (Base64/getEncoder) ^bytes b)
+  #?(:clj (kbytes/base64-encode ^bytes b)
      :cljs (.toString (js/Buffer.from b) "base64")))
 (defn- b64url ^String [b]
   (-> (b64 b) (str/replace "+" "-") (str/replace "/" "_") (str/replace "=" "")))
 (defn- unb64 [^String s]
-  #?(:clj (.decode (Base64/getDecoder) s)
+  #?(:clj (kbytes/base64-decode-bytes s)
      :cljs (js/Uint8Array. (js/Buffer.from s "base64"))))
 (defn- utf8-bytes [^String s]
-  #?(:clj (.getBytes s "UTF-8")
+  #?(:clj (kbytes/utf8-bytes s)
      :cljs (.encode (js/TextEncoder.) s)))
 
 (defn siwe-message
