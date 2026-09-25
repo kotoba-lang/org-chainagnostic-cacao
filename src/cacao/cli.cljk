@@ -22,11 +22,10 @@
 ;; native crypto dep. We DERIVE the issuer DID from the seed and NEVER print the seed
 ;; except from the `seed` command (whose whole job is to emit it, with a stderr warning).
 (ns cacao.cli
-  (:require [kotoba.lang.text :as str]
+  (:require [kotoba.bytes :as kbytes] [kotoba.lang.text :as str]
             #?@(:clj [[ed25519.core :as ed]
                       [cacao.core :as cacao]]))
   #?(:clj (:import (java.security SecureRandom)
-                   (java.util Base64)
                    (java.time Instant)
                    (java.time.temporal ChronoUnit))))
 
@@ -139,10 +138,10 @@
 #?(:clj
    (do
      (defn ^:private b64-encode ^String [^bytes b]
-       (.encodeToString (Base64/getEncoder) b))
+       (kbytes/base64-encode b))
 
      (defn ^:private b64-decode ^bytes [^String s]
-       (.decode (Base64/getDecoder) (str/trim s)))
+       (kbytes/base64-decode-bytes (str/trim s)))
 
      (defn gen-seed
        "32 cryptographically-random bytes — a raw Ed25519 seed. SECRET output."

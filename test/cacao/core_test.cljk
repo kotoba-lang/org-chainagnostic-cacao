@@ -1,5 +1,5 @@
 (ns cacao.core-test
-  (:require [kotoba.bytes :as kbytes] [kotoba.lang.text] [kotoba.test :refer [deftest is testing]]
+  (:require [kotoba.lang.error :as kerror] [kotoba.bytes :as kbytes] [kotoba.lang.text] [kotoba.test :refer [deftest is testing]]
             [cacao.core :as cacao]
             [ed25519.core :as ed])
   (:import (java.security KeyPairGenerator)))
@@ -28,7 +28,7 @@
   ;; at all (verify/verify-chain's `(or (nil? nonce) ...)` fallback treats a
   ;; nonce-less payload as un-dedupeable, not as replay-safe), so silently
   ;; allowing a nonce-less mint would be a footgun.
-  (is (thrown? clojure.lang.ExceptionInfo
+  (is (thrown? kerror/ExceptionInfo
                (cacao/mint (dissoc (opts-for (seed)) :nonce)))))
 
 (deftest tamper-is-rejected
@@ -447,9 +447,9 @@
             the ones landing on a whole second passed -- an intermittent auth
             failure that reads as a flaky network. Refusing at mint time turns
             an opaque 401 into a message naming the field."
-    (is (thrown? clojure.lang.ExceptionInfo (apex-mint {:iat "2026-07-27T10:15:30.123456789Z"})))
-    (is (thrown? clojure.lang.ExceptionInfo (apex-mint {:iat "1785140000"})))
-    (is (thrown? clojure.lang.ExceptionInfo (apex-mint {:exp "2026-07-27T10:20:30.5Z"})))
+    (is (thrown? kerror/ExceptionInfo (apex-mint {:iat "2026-07-27T10:15:30.123456789Z"})))
+    (is (thrown? kerror/ExceptionInfo (apex-mint {:iat "1785140000"})))
+    (is (thrown? kerror/ExceptionInfo (apex-mint {:exp "2026-07-27T10:20:30.5Z"})))
     (is (some? (:cacao-b64 (apex-mint))) "seconds precision passes")))
 
 (deftest apex-instant-predicate-matches-only-the-apex-format
@@ -462,8 +462,8 @@
 (deftest apex-mint-refuses-a-missing-nonce
   (testing "the edge records nonces for replay protection; a mint without one
             is not replay-safe, it is un-dedupeable"
-    (is (thrown? clojure.lang.ExceptionInfo (apex-mint {:nonce ""})))
-    (is (thrown? clojure.lang.ExceptionInfo (apex-mint {:nonce nil})))))
+    (is (thrown? kerror/ExceptionInfo (apex-mint {:nonce ""})))
+    (is (thrown? kerror/ExceptionInfo (apex-mint {:nonce nil})))))
 
 (deftest apex-envelope-header-is-caip122
   (testing "a comment in one of the drifted copies asserted the apex wanted NO
