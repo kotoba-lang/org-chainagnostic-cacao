@@ -1,0 +1,38 @@
+(ns siwe.hash.reference
+  "Keccak-256 through first-party `eth-crypto.keccak` for `@noble/hashes` host
+  substitution (dependency-substitution wave, ADR-2608260200 / ADR-2608301000 /
+  ADR-2608301100).
+
+  Production paths (`siwe.edge`) keep `@noble/hashes/sha3.js` -- it is already
+  the audited hash in the hot ERC-191 signature-recovery path, and this file
+  does not replace it there. This namespace is the correctness / CI seam only,
+  same ladder as `kagi.digest.reference` (ADR-2608301100): a first-party
+  implementation asserted equal to noble's on the same inputs, so a
+  substitution decision can be made from measurement instead of from
+  `@noble/hashes` being the only Keccak-256 anyone has looked at.
+
+  Note this is Ethereum's original-Keccak (pad10*1, first pad byte 0x01, last
+  byte |= 0x80), NOT NIST SHA3-256's 0x06 padding -- the exact distinction
+  `eth-crypto.keccak`'s own docstring calls out, and the one `siwe.edge`
+  depends on for EIP-191 digests, address derivation and EIP-55 checksumming.
+  `@noble/hashes/sha3.js`'s `keccak_256` export is the same original-Keccak
+  variant, which is why the two agree (see `reference-test`)."
+  (:require [eth-crypto.keccak :as keccak]))
+
+(defn keccak256-bytes
+  "bytes (Uint8Array, or any seqable of byte values 0..255) -> 32-byte
+  Keccak-256 digest, as a Uint8Array."
+  [bs]
+  (js/Uint8Array.from (clj->js (keccak/keccak256 bs))))
+
+(defn keccak256-utf8
+  "UTF-8 string -> 32-byte Keccak-256 digest, as a Uint8Array."
+  [s]
+  (keccak256-bytes (.encode (js/TextEncoder.) s)))
+
+(defn keccak256-hex
+  "bytes (Uint8Array, or any seqable of byte values 0..255) -> lowercase hex
+  string of the 32-byte Keccak-256 digest, no `0x` prefix."
+  [bs]
+  (apply str (map #(let [h (.toString % 16)] (if (= 1 (count h)) (str "0" h) h))
+                  (keccak/keccak256 bs))))
