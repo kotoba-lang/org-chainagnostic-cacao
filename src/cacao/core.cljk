@@ -293,7 +293,7 @@
 ;; transit, a compromised intermediate) could be replayed verbatim any
 ;; number of times until its `exp`. The old Rust implementation of this same
 ;; trust boundary had a sharded NonceStore for exactly this (see
-;; kotoba-lang/kotoba CLAUDE.md: "NonceStore: RwLock<HashMap> → DashMap", a
+;; kotoba-lang/kotoba AGENTS.md: "NonceStore: RwLock<HashMap> → DashMap", a
 ;; 64-way sharded in-memory nonce table with a bounded MAX_NONCES and
 ;; expiry-driven eviction); that protection was lost when the Rust code was
 ;; retired in favor of this Clojure reimplementation, which never replaced

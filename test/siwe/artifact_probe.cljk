@@ -7,7 +7,7 @@
 ;; interpreter.
 ;;
 ;; nbb rather than a `.mjs`: this workspace does not add raw JavaScript
-;; harnesses (CLAUDE.md, runtime priority).
+;; harnesses (AGENTS.md, runtime priority).
 ;;
 ;; Some of this guest's exports take a `:document`, which is why it is here
 ;; and not in the shorter probe the string-only guests use: a document
